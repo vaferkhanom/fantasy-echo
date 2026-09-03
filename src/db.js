@@ -6,7 +6,7 @@ let pool = null;
 function getPool() {
   if (!pool) {
     const url = process.env.DATABASE_URL || '';
-    const needsSsl = /sslmode=require/.test(url) || (!!process.env.RAILWAY_ENVIRONMENT && !/localhost/.test(url));
+    const needsSsl = /sslmode=require/.test(url) || process.env.PGSSL === 'require';
     pool = new Pool({
       connectionString: url || undefined,
       ssl: needsSsl ? { rejectUnauthorized: false } : false,
