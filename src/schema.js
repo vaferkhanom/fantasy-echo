@@ -1,0 +1,167 @@
+'use strict';
+const { getPool } = require('../db');
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT PRIMARY KEY,
+  tg_id BIGINT UNIQUE NOT NULL,
+  username TEXT,
+  first_name TEXT NOT NULL DEFAULT '',
+  photo_url TEXT,
+  team_name TEXT,
+  fav_club TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS clubs (
+  id SERIAL PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  fa_name TEXT NOT NULL,
+  en_name TEXT NOT NULL,
+  city TEXT,
+  tier INT NOT NULL DEFAULT 5,
+  tsdb_id TEXT
+);
+CREATE TABLE IF NOT EXISTS players (
+  id SERIAL PRIMARY KEY,
+  club_id INT REFERENCES clubs(id),
+  fa_name TEXT NOT NULL,
+  en_name TEXT,
+  pos TEXT NOT NULL CHECK (pos IN ('GKP','DEF','MID','FWD')),
+  price INT NOT NULL,
+  is_foreign BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'ok',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS gameweeks (
+  id INT PRIMARY KEY,
+  name TEXT,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
+  deadline TIMESTAMPTZ,
+  is_finished BOOLEAN NOT NULL DEFAULT false,
+  is_current BOOLEAN NOT NULL DEFAULT false,
+  is_next BOOLEAN NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS fixtures (
+  id SERIAL PRIMARY KEY,
+  gw_id INT REFERENCES gameweeks(id),
+  tsdb_event_id TEXT UNIQUE,
+  home_club INT REFERENCES clubs(id),
+  away_club INT REFERENCES clubs(id),
+  kickoff TIMESTAMPTZ,
+  home_goals INT,
+  away_goals INT,
+  finished BOOLEAN NOT NULL DEFAULT false,
+  source TEXT NOT NULL DEFAULT 'tsdb',
+  UNIQUE (gw_id, home_club, away_club)
+);
+CREATE TABLE IF NOT EXISTS entries (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(id) UNIQUE,
+  team_name TEXT,
+  bank INT NOT NULL DEFAULT 0,
+  total_points INT NOT NULL DEFAULT 0,
+  gw_points INT NOT NULL DEFAULT 0,
+  hit_taken INT NOT NULL DEFAULT 0,
+  overall_rank BIGINT NOT NULL DEFAULT 0,
+  last_rank BIGINT NOT NULL DEFAULT 0,
+  fav_club TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS squads (
+  id BIGSERIAL PRIMARY KEY,
+  entry_id BIGINT REFERENCES entries(id),
+  gw_id INT REFERENCES gameweeks(id),
+  player_id INT REFERENCES players(id),
+  slot INT NOT NULL,
+  is_captain BOOLEAN NOT NULL DEFAULT false,
+  is_vice BOOLEAN NOT NULL DEFAULT false,
+  UNIQUE (entry_id, gw_id, slot)
+);
+CREATE TABLE IF NOT EXISTS chips (
+  id BIGSERIAL PRIMARY KEY,
+  entry_id BIGINT REFERENCES entries(id),
+  gw_id INT REFERENCES gameweeks(id),
+  chip TEXT NOT NULL,
+  UNIQUE (entry_id, gw_id, chip)
+);
+CREATE TABLE IF NOT EXISTS transfers (
+  id BIGSERIAL PRIMARY KEY,
+  entry_id BIGINT REFERENCES entries(id),
+  gw_id INT REFERENCES gameweeks(id),
+  player_out INT,
+  player_in INT,
+  cost INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS points (
+  entry_id BIGINT REFERENCES entries(id),
+  gw_id INT REFERENCES gameweeks(id),
+  player_id INT REFERENCES players(id),
+  pts INT NOT NULL DEFAULT 0,
+  bps INT NOT NULL DEFAULT 0,
+  minutes INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (entry_id, gw_id, player_id)
+);
+CREATE TABLE IF NOT EXISTS leagues (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  owner_id BIGINT REFERENCES users(id),
+  kind TEXT NOT NULL DEFAULT 'classic',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS league_members (
+  league_id BIGINT REFERENCES leagues(id),
+  entry_id BIGINT REFERENCES entries(id),
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (league_id, entry_id)
+);
+CREATE TABLE IF NOT EXISTS stats_gw (
+  gw_id INT,
+  player_id INT,
+  minutes INT NOT NULL DEFAULT 0,
+  goals INT NOT NULL DEFAULT 0,
+  assists INT NOT NULL DEFAULT 0,
+  clean_sheet BOOLEAN NOT NULL DEFAULT false,
+  conceded INT NOT NULL DEFAULT 0,
+  saves INT NOT NULL DEFAULT 0,
+  pen_saved INT NOT NULL DEFAULT 0,
+  pen_missed INT NOT NULL DEFAULT 0,
+  yellow INT NOT NULL DEFAULT 0,
+  red INT NOT NULL DEFAULT 0,
+  own_goal INT NOT NULL DEFAULT 0,
+  bonus INT NOT NULL DEFAULT 0,
+  bps INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (gw_id, player_id)
+);
+CREATE TABLE IF NOT EXISTS price_hist (
+  player_id INT,
+  gw_id INT,
+  price INT NOT NULL,
+  PRIMARY KEY (player_id, gw_id)
+);
+CREATE TABLE IF NOT EXISTS admin_signals (
+  id BIGSERIAL PRIMARY KEY,
+  gw_id INT,
+  player_id INT,
+  signal JSONB NOT NULL,
+  created_by BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fixtures_gw ON fixtures(gw_id);
+CREATE INDEX IF NOT EXISTS idx_points_gw ON points(gw_id);
+CREATE INDEX IF NOT EXISTS idx_squads_entry ON squads(entry_id, gw_id);
+`;
+
+async function ensureSchema() {
+  const c = getPool();
+  await c.query(SCHEMA);
+}
+
+module.exports = { ensureSchema };
