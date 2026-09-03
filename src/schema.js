@@ -1,5 +1,5 @@
 'use strict';
-const { getPool } = require('../db');
+const { getPool } = require('./db');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
