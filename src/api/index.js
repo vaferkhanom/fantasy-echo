@@ -173,6 +173,15 @@ router.get('/my-points', async (req, res) => {
 });
 
 // Admin
+router.post('/admin/bootstrap', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { seedClubsAndPlayers } = require('../seed');
+  const seeded = await seedClubsAndPlayers();
+  const r = await syncSeason();
+  await refreshGwFlags();
+  await refreshRanks();
+  res.json({ seeded, ...r });
+});
 router.post('/admin/sync-season', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const r = await syncSeason();
