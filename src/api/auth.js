@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
-const cfg = require('./config');
-const { query } = require('./db');
+const cfg = require('../config');
+const { query } = require('../db');
 
 /* Validate Telegram WebApp initData (HMAC-SHA256 per official docs). */
 function validateInitData(initData) {

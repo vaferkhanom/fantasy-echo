@@ -1,6 +1,6 @@
 'use strict';
 const crypto = require('crypto');
-const { query } = require('./db');
+const { query } = require('../db');
 
 function code() {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';

@@ -1,6 +1,6 @@
 'use strict';
-const { query } = require('./db');
-const C = require('./config').leetcode;
+const { query } = require('../db');
+const C = require('../config').leetcode;
 
 const CHIPS = ['wildcard', 'freehit', 'bboost', '3xc'];
 const CHIP_ONCE = { wildcard: 1, freehit: 1, bboost: 1, '3xc': 1 };

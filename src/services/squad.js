@@ -1,6 +1,6 @@
 'use strict';
-const { query, tx } = require('./db');
-const C = require('./config').leetcode;
+const { query, tx } = require('../db');
+const C = require('../config').leetcode;
 
 function formationOk(lineup) {
   // lineup: array of slots 1..11 with pos

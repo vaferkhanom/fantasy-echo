@@ -146,7 +146,7 @@ router.get('/leaderboard', async (req, res) => {
 });
 
 // Fixtures + my gw history
-router.get('/fixtures/:gw?', async (req, res) => {
+router.get('/fixtures', async (req, res) => {
   const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
   const { rows } = await query(`
     SELECT f.*, c1.fa_name AS home, c1.en_name AS home_en, c2.fa_name AS away, c2.en_name AS away_en
@@ -155,7 +155,7 @@ router.get('/fixtures/:gw?', async (req, res) => {
   res.json({ gwId, fixtures: rows });
 });
 
-router.get('/my-points/:gw?', async (req, res) => {
+router.get('/my-points', async (req, res) => {
   const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
   const detail = await computeEntryGw(req.entry.id, gwId);
   const { rows } = await query(`
