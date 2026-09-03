@@ -1,7 +1,7 @@
 'use strict';
-const { query, tx } = require('../db');
+const { query, tx } = require('./db');
 const { scoreFixture } = require('./scoring');
-const { gwTeamConceded } = require('./ingest/tsdb');
+const { gwTeamConceded } = require('./tsdb');
 const { recomputeAllForGw, refreshRanks } = require('./entries');
 const { updatePrices, logPrices } = require('./prices');
 const { refreshGwFlags } = require('./gameweek');

@@ -1,6 +1,6 @@
 'use strict';
-const { query } = require('../db');
-const C = require('../config').leetcode;
+const { query } = require('./db');
+const C = require('./config').leetcode;
 const { toUnits, fromUnits } = require('./transfers');
 
 /*

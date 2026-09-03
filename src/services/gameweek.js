@@ -1,5 +1,5 @@
 'use strict';
-const { query } = require('../db');
+const { query } = require('./db');
 
 /* Gameweek helpers. Current/next gameweek derived from fixtures. */
 

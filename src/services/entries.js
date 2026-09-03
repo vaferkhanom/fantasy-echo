@@ -1,6 +1,6 @@
 'use strict';
-const { query } = require('../db');
-const C = require('../config').leetcode;
+const { query } = require('./db');
+const C = require('./config').leetcode;
 const { scoreFixture } = require('./scoring');
 const { autoSubs, captainTimes, playersInGw } = require('./squad');
 const { activeChips } = require('./chips');

@@ -1,11 +1,11 @@
 'use strict';
 /* Telegram bot: long polling (no webhook dependency), Persian UX. */
-const cfg = require('../config');
-const { query } = require('../db');
-const { currentGw, nextGw } = require('../services/gameweek');
-const { myLeagues, createLeague, joinByCode } = require('../services/leagues');
-const { finishGw, upsertSignal } = require('../services/engine');
-const { syncSeason, syncCurrent } = require('../services/ingest/tsdb');
+const cfg = require('./config');
+const { query } = require('./db');
+const { currentGw, nextGw } = require('./services/gameweek');
+const { myLeagues, createLeague, joinByCode } = require('./services/leagues');
+const { finishGw, upsertSignal } = require('./services/engine');
+const { syncSeason, syncCurrent } = require('./services/ingest/tsdb');
 
 const API = 'https://api.telegram.org/bot';
 let offset = 0;
