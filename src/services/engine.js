@@ -38,23 +38,22 @@ async function finishGw(gwId) {
   const scored = scoreFixture(statsByPlayer, conceded, playersById);
   console.log('[finish] players scored:', Object.keys(scored).length);
 
-  await tx(async client => {
-    await client.query(`DELETE FROM points WHERE gw_id=$1`, [gwId]);
-    const entries = Object.entries(scored);
-    for (let i = 0; i < entries.length; i += 100) {
-      const chunk = entries.slice(i, i + 100);
-      const vals = [];
-      const rows = chunk.map(([pid, r], j) => {
-        vals.push(gwId, Number(pid), r.pts, r.bps, r.minutes);
-        const o = j * 5;
-        return `(0,$${o + 1},$${o + 2},$${o + 3},$${o + 4},$${o + 5})`;
-      });
-      await client.query(
-        `INSERT INTO points (entry_id, gw_id, player_id, pts, bps, minutes) VALUES ${rows.join(',')}`,
-        vals);
-    }
-  });
-  console.log('[finish] points frozen');
+  await query(`DELETE FROM points WHERE gw_id=$1`, [gwId]);
+  T('points deleted');
+  const entries = Object.entries(scored);
+  for (let i = 0; i < entries.length; i += 100) {
+    const chunk = entries.slice(i, i + 100);
+    const vals = [];
+    const rows = chunk.map(([pid, r], j) => {
+      vals.push(gwId, Number(pid), r.pts, r.bps, r.minutes);
+      const o = j * 5;
+      return `(0,$${o + 1},$${o + 2},$${o + 3},$${o + 4},$${o + 5})`;
+    });
+    await query(
+      `INSERT INTO points (entry_id, gw_id, player_id, pts, bps, minutes) VALUES ${rows.join(',')}`,
+      vals);
+  }
+  T('points frozen');
 
   await recomputeAllForGw(gwId);
   console.log('[finish] entries recomputed');
