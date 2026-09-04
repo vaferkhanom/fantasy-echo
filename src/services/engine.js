@@ -16,7 +16,10 @@ const { refreshGwFlags } = require('./gameweek');
  * 6. Refresh overall ranks, update price engine, log price history.
  */
 async function finishGw(gwId) {
+  const T = (s) => console.log(`[finish:${gwId}] ${s} +${Date.now() - t0}ms`);
+  const t0 = Date.now();
   await query(`UPDATE gameweeks SET is_finished=true WHERE id=$1`, [gwId]);
+  T('marked finished');
 
   const conceded = await gwTeamConceded(gwId);
   const { rows: players } = await query(`SELECT id, pos, club_id FROM players`);

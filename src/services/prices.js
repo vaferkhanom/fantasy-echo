@@ -20,12 +20,7 @@ async function updatePrices(gwId) {
   const now = {};
   for (const r of owners) now[r.player_id] = r.n;
 
-  const { rows: prev } = await query(`
-    SELECT DISTINCT ON (player_id) player_id, n FROM (
-      SELECT ph.player_id, ph.price, s.entry_id
-      FROM price_hist ph
-    ) x` , []);
-  // simpler: previous ownership snapshot stored as meta
+  // previous ownership snapshot stored as meta
   const { rows: meta } = await query(`SELECT value FROM meta WHERE key='ownership'`);
   const prevOwn = meta[0] ? JSON.parse(meta[0].value) : {};
 
