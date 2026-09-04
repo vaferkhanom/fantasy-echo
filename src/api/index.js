@@ -199,6 +199,14 @@ router.post('/admin/diag', async (req, res) => {
   const mark = k => { t[k] = Date.now(); };
   try {
     mark('start');
+    // kill sessions stuck idle-in-transaction (orphans from killed containers)
+    if (req.body.kill) {
+      await query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+         WHERE datname=current_database() AND pid <> pg_backend_pid()
+           AND state='idle in transaction'`);
+      mark('killed');
+    }
     const c1 = await query(`SELECT count(*)::int AS n FROM admin_signals`);
     mark('count_signals');
     const c2 = await query(`SELECT count(*)::int AS n FROM stats_gw`);
@@ -206,15 +214,21 @@ router.post('/admin/diag', async (req, res) => {
     let locks = [];
     try {
       const { rows } = await query(
-        `SELECT locktype, mode, pid, granted FROM pg_locks WHERE NOT granted LIMIT 20`);
+        `SELECT l.locktype, l.mode, l.granted, a.state, a.wait_event_type, a.wait_event,
+                left(a.query,100) AS q, now()-a.xact_start AS xact_age
+         FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid=l.pid
+         WHERE l.database IS NOT DISTINCT FROM (SELECT oid FROM pg_database WHERE datname=current_database())
+           AND a.pid IS NOT NULL AND a.pid <> pg_backend_pid()
+         LIMIT 30`);
       locks = rows;
     } catch (e) { locks = [{ err: e.message }]; }
     mark('locks');
     let act = [];
     try {
       const { rows } = await query(
-        `SELECT pid, state, wait_event_type, wait_event, left(query,120) AS q
-         FROM pg_stat_activity WHERE datname='railway' AND pid <> pg_backend_pid() LIMIT 20`);
+        `SELECT pid, state, wait_event_type, wait_event, left(query,120) AS q,
+                now()-xact_start AS xact_age, now()-query_start AS q_age
+         FROM pg_stat_activity WHERE datname=current_database() AND pid <> pg_backend_pid() LIMIT 20`);
       act = rows;
     } catch (e) { act = [{ err: e.message }]; }
     mark('activity');

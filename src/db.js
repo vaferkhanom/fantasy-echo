@@ -28,6 +28,8 @@ async function tx(fn) {
   const client = await c.connect();
   try {
     await client.query('BEGIN');
+    await client.query(`SET LOCAL idle_in_transaction_session_timeout = '30s'`);
+    await client.query(`SET LOCAL statement_timeout = '60s'`);
     const res = await fn(client);
     await client.query('COMMIT');
     return res;
