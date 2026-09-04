@@ -10,8 +10,70 @@ const POS_COLORS = { GKP: ['#7dd3fc', '#38bdf8'], DEF: ['#86efac', '#22c55e'], M
 
 tg?.ready();
 tg?.expand();
-tg?.setHeaderColor('#07090d');
-tg?.setBackgroundColor('#07090d');
+tg?.setHeaderColor('#05080a');
+tg?.setBackgroundColor('#05080a');
+
+/* ---------- helpers ---------- */
+function haptic(kind = 'light') {
+  try { tg?.HapticFeedback?.impactOccurred(kind); } catch {}
+}
+function lum(hex) {
+  const h = String(hex || '#888888').replace('#', '');
+  const f = h.length === 3 ? h.split('').map(c => c + c).join('') : h.padEnd(6, '8');
+  const r = parseInt(f.slice(0, 2), 16) / 255, g = parseInt(f.slice(2, 4), 16) / 255, b = parseInt(f.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function kitStyle(p) {
+  const c = state.clubsById[p.club_id];
+  const c1 = (c && c.color1) || POS_COLORS[p.pos][0];
+  const c2 = (c && c.color2) || POS_COLORS[p.pos][1];
+  const dark = lum(c1) > 0.55;
+  return `background:linear-gradient(160deg,${c1},${c2});color:${dark ? '#10140f' : '#fff'}`;
+}
+function avatar(p, cls = 'pl-ava') {
+  const inner = p.portrait
+    ? `<img src="${p.portrait}" alt="" loading="lazy" onerror="this.remove()">`
+    : (p.pos || '').slice(0, 3);
+  const bg = p.club_id && state.clubsById[p.club_id]
+    ? `background:linear-gradient(135deg,${state.clubsById[p.club_id].color1},${state.clubsById[p.club_id].color2});color:${lum(state.clubsById[p.club_id].color1) > 0.55 ? '#10140f' : '#fff'}`
+    : `background:linear-gradient(135deg,${POS_COLORS[p.pos][0]},${POS_COLORS[p.pos][1]})`;
+  return `<span class="${cls}" style="${bg}">${inner}</span>`;
+}
+function jdate(iso, withWeekday = false) {
+  try {
+    const o = withWeekday
+      ? { weekday: 'long', day: 'numeric', month: 'long' }
+      : { day: 'numeric', month: 'long' };
+    return new Date(iso).toLocaleDateString('fa-IR', { ...o, timeZone: 'Asia/Tehran' });
+  } catch { return ''; }
+}
+function jtime(iso) {
+  try { return new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran' }); }
+  catch { return ''; }
+}
+function countUp(el, target, dur = 900) {
+  if (!el) return;
+  const t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    el.textContent = faNum(Math.round(target * e));
+    if (k < 1 && el.isConnected) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+async function renderTicker() {
+  try {
+    const boot = await api('/boot');
+    const items = (boot.latest || []).map(f =>
+      `<span class="tick-item">${f.home} <b>${faNum(f.home_goals)} - ${faNum(f.away_goals)}</b> ${f.away}</span>`
+    ).join('<span class="tick-item">⚽</span>');
+    if (!items) return;
+    const t = document.getElementById('ticker');
+    document.getElementById('ticker-track').innerHTML = items + items;
+    t.classList.remove('hidden');
+  } catch {}
+}
 
 function headers() {
   const h = { 'content-type': 'application/json' };
@@ -57,14 +119,14 @@ const BALL_SVG = `<svg class="ball" viewBox="0 0 100 100"><defs><radialGradient 
 
 function renderSplash() {
   document.getElementById('view').innerHTML = `
-    <div class="hero-grad"></div>
     <div class="splash">
       ${BALL_SVG}
       <div class="logo">echtasy</div>
       <div class="tagline">فانتزی‌فوتبال لیگ برتر خلیج فارس<br>تیم رویایی‌ات را بساز و با کل ایران رقابت کن</div>
-      <button class="btn" id="btn-enter">شروع ماجراجویی</button>
+      <div class="feats"><span>⚽ بازیکنان واقعی</span><span>📈 امتیاز زنده</span><span>🏆 لیگ خصوصی</span></div>
+      <button class="btn" id="btn-enter">شروع ماجراجویی 🚀</button>
     </div>`;
-  document.getElementById('btn-enter').onclick = () => go('home');
+  document.getElementById('btn-enter').onclick = () => { haptic('medium'); go('home'); };
 }
 
 /* ============ HOME ============ */
@@ -73,65 +135,95 @@ async function renderHome() {
   v.innerHTML = `<div class="stat-grid">${'<div class="stat"><div class="v skel" style="height:24px"></div><div class="k">—</div></div>'.repeat(3)}</div><div class="card skel" style="height:120px"></div>`;
   const [boot, me] = await Promise.all([api('/boot'), api('/me').catch(() => null)]);
   state.me = me; state.gw = boot.gw;
+  renderTicker();
   const hasSquad = me?.squad?.length === 15;
-  const gwName = boot.gw ? `هفته ${faNum(boot.gw.id)}` : 'پیش‌فصل';
-  document.getElementById('gw-badge').textContent = gwName;
-  document.getElementById('gw-badge').classList.remove('hidden');
+  const gwName = boot.gw ? `هفته ${faNum(boot.gw.id)}` : (boot.next ? `هفته ${faNum(boot.next.id)}` : 'پیش‌فصل');
+  const gwBadge = document.getElementById('gw-badge');
+  gwBadge.textContent = gwName;
+  gwBadge.classList.remove('hidden');
   document.getElementById('btn-admin').classList.toggle('hidden', !me?.isAdmin);
+
+  const rank = me?.entry?.overall_rank || 0;
+  const managers = Math.max(boot.managers, 1);
+  const ringPct = rank ? Math.max(0.06, 1 - (rank - 1) / managers) : 0;
+  const C = 2 * Math.PI * 40;
 
   let deadline = '';
   if (boot.next?.deadline) {
-    deadline = `<div class="card glow">
-      <div class="h-title">⏳ دِدلاین هفته ${faNum(boot.next.id)}</div>
+    deadline = `<div class="card glow live-edge">
+      <div class="eyebrow">ددلاین هفته ${faNum(boot.next.id)}</div>
       <div class="countdown" id="cd"></div>
-      <div class="progress"><i style="width:0%"></i></div>
+      <div class="small faint" style="text-align:center;margin-top:10px">${jdate(boot.next.deadline, true)} ساعت ${jtime(boot.next.deadline)}</div>
     </div>`;
   }
   v.innerHTML = `
-    <div class="hero-grad"></div>
     ${deadline}
-    <div class="stat-grid">
-      <div class="stat pop"><div class="v">${faNum(me?.entry?.total_points || 0)}</div><div class="k">امتیاز کل</div></div>
-      <div class="stat pop" style="animation-delay:.07s"><div class="v">${faNum(me?.entry?.overall_rank || '—')}</div><div class="k">رتبه</div></div>
-      <div class="stat pop" style="animation-delay:.14s"><div class="v">${faNum(boot.managers)}</div><div class="k">مدیر</div></div>
+    <div class="card glow">
+      <div class="hero-rank">
+        <div class="ring pop">
+          <svg width="92" height="92" viewBox="0 0 92 92">
+            <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffe08a"/><stop offset="100%" stop-color="#f5c518"/>
+            </linearGradient></defs>
+            <circle class="track" cx="46" cy="46" r="40" fill="none" stroke-width="8"/>
+            <circle class="val" cx="46" cy="46" r="40" fill="none" stroke-width="8"
+              stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - ringPct)).toFixed(1)}"/>
+          </svg>
+          <div class="center"><b id="rank-num">${rank ? faNum(rank) : '—'}</b><span>رتبه تو</span></div>
+        </div>
+        <div style="flex:1">
+          <div class="eyebrow">عملکرد</div>
+          <div class="row" style="gap:18px">
+            <div><div class="num gold-t" style="font-size:26px;font-weight:700" id="stat-total">0</div><div class="small muted">امتیاز کل</div></div>
+            <div><div class="num" style="font-size:26px;font-weight:700" id="stat-gw">0</div><div class="small muted">هفته</div></div>
+            <div><div class="num" style="font-size:26px;font-weight:700">${faNum(managers)}</div><div class="small muted">مدیر</div></div>
+          </div>
+        </div>
+      </div>
+      ${hasSquad
+        ? `<button class="btn ghost" id="btn-myteam" style="margin-top:14px">مشاهده هفته من</button>`
+        : `<button class="btn" id="btn-build" style="margin-top:14px">🛠 ساخت تیم رویایی</button>`}
     </div>
-    ${hasSquad ? `<button class="btn ghost" id="btn-myteam">مشاهده هفته من ${faNum(me?.entry?.gw_points || 0)} امتیاز</button>` : `
-    <div class="card glow" style="text-align:center">
-      <div style="font-size:34px">🏆</div>
-      <div class="h-title" style="justify-content:center">تیمت را بساز!</div>
-      <p class="muted small" style="line-height:2">بودجه ${faNum(100)} میلیونی داری. بازیکنان واقعی لیگ برتر ایران را با قیمت واقعی خریداری کن، ترکیب بچین و کاپیتانت را انتخاب کن.</p>
-      <button class="btn" id="btn-build">🛠 ساخت تیم</button>
-    </div>`}
+    ${!hasSquad ? `<div class="card"><div class="h-title">🏆 فانتزی لیگ برتر چطور کار می‌کند؟</div>
+      <p class="muted small" style="line-height:2.1;margin:0">با ${faNum(100)} میلیون بودجه، ۱۵ بازیکن واقعی لیگ را بخر. هر هفته با نتایج واقعی امتیاز بگیر، کاپیتانت را دوبرابر کن و در لیگ‌های خصوصی با دوستانت رقابت کن.</p></div>` : ''}
     <div class="card">
       <div class="h-title">⚽ آخرین نتایج</div>
       <div id="latest-fx"></div>
       <button class="btn ghost sm" id="btn-allfx">همه بازی‌ها</button>
     </div>
     <div class="card">
-      <div class="h-title">🥇 برترین‌های overall</div>
+      <div class="h-title">🥇 برترین مدیران</div>
       <div id="lb-mini"></div>
       <button class="btn ghost sm" id="btn-lb">لیدربورد کامل</button>
     </div>`;
+  countUp(v.querySelector('#stat-total'), me?.entry?.total_points || 0);
+  countUp(v.querySelector('#stat-gw'), me?.entry?.gw_points || 0);
+  if (rank) countUp(v.querySelector('#rank-num'), rank);
   if (deadline && boot.next?.deadline) startCountdown(boot.next.deadline);
   const lfx = v.querySelector('#latest-fx');
-  lfx.innerHTML = boot.latest.map(fxRow).join('') || '<p class="muted small">هنوز بازی‌ای برگزار نشده.</p>';
+  lfx.innerHTML = boot.latest.map(fxRow).join('') || '<div class="empty"><div class="big">🏟</div><p>هنوز بازی‌ای برگزار نشده.</p></div>';
   const lb = await api('/leaderboard').catch(() => []);
-  v.querySelector('#lb-mini').innerHTML = lb.slice(0, 5).map((r, i) => lbRow(r, i)).join('') || '<p class="muted small">هنوز بازیکنی ثبت‌نام نکرده. اولین باشی!</p>';
-  v.querySelector('#btn-lb').onclick = () => renderLeaderboard();
-  v.querySelector('#btn-allfx').onclick = () => renderFixtures();
-  const b = v.querySelector('#btn-build'); if (b) b.onclick = () => go('squad');
-  const mt = v.querySelector('#btn-myteam'); if (mt) mt.onclick = () => renderMyPoints(boot.gw?.id);
+  const myId = me?.entry?.id;
+  v.querySelector('#lb-mini').innerHTML = lb.slice(0, 5).map((r, i) => lbRow(r, i, null)).join('') || '<p class="muted small">هنوز بازیکنی ثبت‌نام نکرده. اولین باش!</p>';
+  v.querySelector('#btn-lb').onclick = () => { haptic(); renderLeaderboard(); };
+  v.querySelector('#btn-allfx').onclick = () => { haptic(); renderFixtures(); };
+  const b = v.querySelector('#btn-build'); if (b) b.onclick = () => { haptic('medium'); go('squad'); };
+  const mt = v.querySelector('#btn-myteam'); if (mt) mt.onclick = () => { haptic(); renderMyPoints(boot.gw?.id); };
 }
 
 function fxRow(f) {
-  const sc = f.finished ? `<span class="num">${faNum(f.home_goals)} - ${faNum(f.away_goals)}</span>` : '—';
-  return `<div class="fx"><div class="t a">${f.home}</div><div class="sc">${sc}</div><div class="t b">${f.away}</div></div>`;
+  const sc = f.finished
+    ? `<span class="num">${faNum(f.home_goals)} - ${faNum(f.away_goals)}</span>`
+    : `<span class="vs num">${jtime(f.kickoff)}</span>`;
+  const sub = f.finished ? '' : `<div class="dt">${jdate(f.kickoff)}</div>`;
+  return `<div class="fx"><div class="t a">${f.home}</div><div class="mid"><div class="sc ${f.finished ? 'ft' : ''}">${sc}</div>${sub}</div><div class="t b">${f.away}</div></div>`;
 }
-function lbRow(r, i) {
+function lbRow(r, i, myEntryId) {
   const name = r.team_name || r.first_name || '—';
-  return `<div class="lb-row"><div class="lb-pos ${i < 3 ? 'top' + (i + 1) : ''}">${faNum(i + 1)}</div>
-    <div class="lb-name"><div class="n">${r.team_name || name}</div><div class="muted small">${r.first_name || ''}</div></div>
-    <div class="lb-pts num">${faNum(r.total_points)}</div></div>`;
+  const me = myEntryId && (r.entry_id === myEntryId || r.id === myEntryId);
+  return `<div class="lb-row ${me ? 'me' : ''}"><div class="lb-pos ${i < 3 ? 'top' + (i + 1) : ''}">${faNum(i + 1)}</div>
+    <div class="lb-name"><div class="n">${r.team_name || name}${me ? ' (تو)' : ''}</div><div class="muted small">${r.first_name || ''}</div></div>
+    <div class="lb-pts num">${faNum(r.total_points)}<small>هفته ${faNum(r.gw_points)}</small></div></div>`;
 }
 function startCountdown(deadlineStr) {
   const el = document.getElementById('cd'); if (!el) return;
@@ -149,57 +241,78 @@ function startCountdown(deadlineStr) {
 /* ============ MARKET ============ */
 async function renderMarket() {
   const v = document.getElementById('view');
-  v.innerHTML = `<div class="hero-grad"></div>
-    <div class="row between" style="margin-bottom:10px"><div class="h-title" style="margin:0">🛒 بازار بازیکنان</div>
-    <div class="pill">بانک: <b class="num">${money(state.me?.entry?.bank || 0)}</b></div></div>
-    <div class="search-wrap"><input id="q" type="search" placeholder="جستجوی بازیکن یا باشگاه…">
-    <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2"/></svg></div>
-    <div class="chips" id="poschips">
-      <button class="chip on" data-p="all">همه</button>
-      <button class="chip" data-p="GKP">دروازه‌بان</button>
-      <button class="chip" data-p="DEF">دفاع</button>
-      <button class="chip" data-p="MID">هافبک</button>
-      <button class="chip" data-p="FWD">مهاجم</button>
+  v.innerHTML = `
+    <div class="row between" style="margin-bottom:4px">
+      <div><div class="eyebrow">بازار نقل‌وانتقالات</div>
+      <div style="font-size:19px;font-weight:800">🛒 بازیکنان لیگ</div></div>
+      <div class="pill gold">بانک <b class="num">${money(state.me?.entry?.bank || 0)}</b></div>
     </div>
-    <div id="plist"></div>`;
+    <div class="sticky-bar">
+      <div class="search-wrap"><input id="q" type="search" placeholder="جستجوی بازیکن یا باشگاه…">
+      <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2"/></svg></div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <div class="chips" id="poschips" style="margin:0;flex:1">
+          <button class="chip on" data-p="all">همه</button>
+          <button class="chip" data-p="GKP">دروازه‌بان</button>
+          <button class="chip" data-p="DEF">دفاع</button>
+          <button class="chip" data-p="MID">هافبک</button>
+          <button class="chip" data-p="FWD">مهاجم</button>
+        </div>
+        <select id="sort" class="sel" style="width:118px;padding:9px 10px;font-size:12px">
+          <option value="price-desc">گران‌ترین</option>
+          <option value="price-asc">ارزان‌ترین</option>
+          <option value="name">نام</option>
+        </select>
+      </div>
+    </div>
+    <div id="plist" class="stagger"></div>`;
   if (!state.players.length) {
     state.players = await api('/players');
     const clubs = await api('/clubs');
     state.clubsById = Object.fromEntries(clubs.map(c => [c.id, c]));
   }
-  let pos = 'all';
+  let pos = 'all', sort = 'price-desc';
   const draw = () => {
     const q = v.querySelector('#q').value.trim();
     let list = state.players;
     if (pos !== 'all') list = list.filter(p => p.pos === pos);
-    if (q) list = list.filter(p => (p.fa_name + p.en_name + p.club).includes(q));
-    v.querySelector('#plist').innerHTML = list.slice(0, 80).map(playerCard).join('') || '<p class="muted small">چیزی پیدا نشد.</p>';
+    if (q) list = list.filter(p => (p.fa_name + (p.en_name || '') + p.club).includes(q));
+    if (sort === 'price-desc') list = [...list].sort((a, b) => b.price - a.price);
+    else if (sort === 'price-asc') list = [...list].sort((a, b) => a.price - b.price);
+    else list = [...list].sort((a, b) => String(a.fa_name).localeCompare(String(b.fa_name), 'fa'));
+    const box = v.querySelector('#plist');
+    box.classList.remove('stagger'); void box.offsetWidth; box.classList.add('stagger');
+    box.innerHTML = list.slice(0, 80).map(playerCard).join('') || '<div class="empty"><div class="big">🔍</div><p>بازیکنی پیدا نشد.</p></div>';
     v.querySelectorAll('.pl-card').forEach(el => el.onclick = () => playerSheet(+el.dataset.id));
   };
   v.querySelector('#q').oninput = draw;
+  v.querySelector('#sort').onchange = e => { sort = e.target.value; draw(); };
   v.querySelectorAll('#poschips .chip').forEach(b => b.onclick = () => {
+    haptic();
     v.querySelectorAll('#poschips .chip').forEach(x => x.classList.remove('on'));
     b.classList.add('on'); pos = b.dataset.p; draw();
   });
   draw();
 }
 function playerCard(p) {
-  const [c1, c2] = POS_COLORS[p.pos];
+  const c = state.clubsById[p.club_id];
   return `<div class="pl-card" data-id="${p.id}">
-    <div class="pl-ava" style="background:linear-gradient(135deg,${c1},${c2})">${p.pos}</div>
+    ${avatar(p)}
     <div class="pl-info"><div class="pl-name">${p.fa_name}</div>
-      <div class="pl-club">${p.club} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
-    <div class="pl-price">${money(p.price)}</div></div>`;
+      <div class="pl-club">${c ? `<span class="club-dot" style="background:${c.color1}"></span>` : ''}${p.club} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
+    <div class="pl-price">${money(p.price)}<small>میلیون</small></div></div>`;
 }
 function playerSheet(id) {
   const p = state.players.find(x => x.id === id); if (!p) return;
-  const [c1, c2] = POS_COLORS[p.pos];
-  sheet(`<h3 class="row"><span class="pl-ava" style="background:linear-gradient(135deg,${c1},${c2})">${p.pos}</span> ${p.fa_name}</h3>
+  sheet(`<h3 class="row">${avatar(p)}<span>${p.fa_name}</span></h3>
     <p class="muted small">${p.en_name || ''} · ${p.club} · ${posFa[p.pos]}${p.is_foreign ? ' · 🌍 غیرایرانی' : ''}</p>
-    <div class="row between card" style="margin:10px 0"><span class="muted">قیمت</span><b class="num" style="font-size:18px;color:var(--gold2)">${money(p.price)}M</b></div>
-    <p class="muted small" style="line-height:2">${p.price >= 7 ? '⭐ ستاره‌ی خط ' + posFa[p.pos] + ' — امتیازساز اصلی.' : p.price <= 4.5 ? '💎 ارزش خرید بالا — گزینه اقتصادی هوشمندانه.' : '✔ گزینه مطمئن برای ترکیب.'}</p>
-    <button class="btn" id="btn-buy">افزودن به تیم</button>`);
+    <div class="stat-line"><span class="muted">قیمت</span><b class="num gold-t" style="font-size:18px">${money(p.price)} میلیون</b></div>
+    <div class="stat-line"><span class="muted">پست</span><span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div>
+    <div class="stat-line"><span class="muted">باشگاه</span><b>${p.club}</b></div>
+    <p class="muted small" style="line-height:2.1;margin:12px 0">${p.price >= 7 ? '⭐ ستاره‌ی خط ' + posFa[p.pos] + ' — امتیازساز اصلی تیم.' : p.price <= 4.5 ? '💎 ارزش خرید بالا — گزینه اقتصادی هوشمندانه برای پر کردن ترکیب.' : '✔ گزینه مطمئن و آماده برای ترکیب اصلی.'}</p>
+    <button class="btn" id="btn-buy">افزودن به تیم ⚡</button>`);
   document.getElementById('btn-buy').onclick = () => {
+    haptic('medium');
     addToDraft(p);
     closeSheet();
   };
@@ -283,34 +396,28 @@ function removeFromDraft(slotIdx) {
 function drawPitch() {
   const v = document.getElementById('view');
   const d = state.draft, t = draftTotals();
-  const byPos = pos => d.slots.map((s, i) => ({ ...s, i })).filter(s => (s.player?.pos || pos) === pos);
-  const rowHtml = (pos, count) => {
-    const items = byPos(pos).slice(0, count + 2);
-    return `<div class="pitch-row">${d.slots.map((s, i) => ({ ...s, i })).filter(s => !s.player ? s.slot <= 11 : s.player.pos === pos).filter(s => count > 0).slice(0, count).map(s => pjHtml(s)).join('')}</div>`;
-  };
-  // Build rows by formation
   const f = d.formation;
   const starting = d.slots.slice(0, 11);
   const bench = d.slots.slice(11);
-  const rowOf = pos => {
-    let items = starting.filter(s => s.player?.pos === pos);
-    const empties = Math.max(0, rowCount(pos) - items.length);
-    return items.map(pjHtml).concat(Array(empties).fill(pjHtml({ player: null }))).join('');
-  };
   const rowCount = pos => pos === 'GKP' ? 1 : pos === 'DEF' ? f.d : pos === 'MID' ? f.m : f.f;
-  v.innerHTML = `<div class="hero-grad"></div>
+  const rowOf = pos => {
+    const items = starting.filter(s => s.player?.pos === pos);
+    const empties = Math.max(0, rowCount(pos) - items.length);
+    return items.map(s => pjHtml(s)).concat(Array(empties).fill(pjHtml({ player: null }, null, pos))).join('');
+  };
+  const cap = d.slots.find(s => s.is_captain && s.player)?.player;
+  v.innerHTML = `
     <div class="row between" style="margin-bottom:10px">
-      <div class="h-title" style="margin:0">🧩 ترکیب تیم</div>
-      <div class="pill num">${faNum(t.n)}/۱۵</div>
+      <div><div class="eyebrow">ترکیب تیم</div>
+      <div style="font-size:19px;font-weight:800">${state.me?.entry?.team_name || 'تیم من'}</div></div>
+      <div class="pill num ${t.n === 15 ? 'gold' : ''}">${faNum(t.n)} / ۱۵</div>
     </div>
-    <div class="row" style="margin-bottom:10px;gap:8px">
-      <select id="fmt" class="chip" style="border-radius:12px;padding:8px 12px;background:var(--bg2);color:var(--txt);border:1px solid var(--stroke)">
-        ${FORMATIONS.map(x => `<option value="${x.id}" ${x.id === f.id ? 'selected' : ''}>${faNum(x.id)}</option>`).join('')}
-      </select>
-      <button class="btn sm green" id="btn-save">ثبت تیم</button>
-      <button class="btn sm ghost" id="btn-chip">چیپ</button>
+    <div class="seg" style="margin-bottom:12px" id="fmtseg">
+      ${FORMATIONS.map(x => `<button data-f="${x.id}" class="${x.id === f.id ? 'on' : ''}">${faNum(x.id)}</button>`).join('')}
     </div>
-    <div class="pitch-wrap"><div class="pitch-line"></div><div class="pitch-mid"></div><div class="pitch-circle"></div>
+    <div class="pitch-wrap">
+      <div class="pitch-flood"></div><div class="pitch-line"></div><div class="pitch-mid"></div>
+      <div class="pitch-circle"></div><div class="pitch-spot"></div>
       <div class="pitch">
         <div class="pitch-row">${rowOf('GKP')}</div>
         <div class="pitch-row">${rowOf('DEF')}</div>
@@ -318,32 +425,49 @@ function drawPitch() {
         <div class="pitch-row">${rowOf('FWD')}</div>
       </div>
     </div>
-    <div class="bench-row bench">${bench.map(s => pjHtml(s, true)).join('')}</div>
-    <div class="row between card" style="margin-top:14px">
-      <div><div class="muted small">هزینه</div><b class="num">${money(t.spent)}</b></div>
-      <div style="text-align:center"><div class="muted small">بانک</div><b class="num" style="color:var(--green)">${money(Math.max(t.bank, 0))}</b></div>
-      <div style="text-align:left"><div class="muted small">کاپیتان</div><b>${d.slots.find(s => s.is_captain && s.player)?.player?.fa_name || '—'}</b></div>
+    <div class="bench-bar"><span class="lbl">نیمکت ذخیره</span><span class="line"></span></div>
+    <div class="bench-row">${bench.map((s, bi) => pjHtml({ ...s, i: 11 + bi })).join('')}</div>
+    <div class="card" style="margin-top:14px">
+      <div class="row between">
+        <div><div class="muted small">هزینه تیم</div><b class="num" style="font-size:18px">${money(t.spent)}</b></div>
+        <div style="text-align:center"><div class="muted small">موجودی بانک</div><b class="num green-t" style="font-size:18px">${money(Math.max(t.bank, 0))}</b></div>
+        <div style="text-align:left"><div class="muted small">کاپیتان ©️</div><b style="font-size:13px">${cap ? cap.fa_name : '—'}</b></div>
+      </div>
+      <div class="row" style="gap:10px;margin-top:14px">
+        <button class="btn green" id="btn-save" style="flex:1.4">ثبت تیم ✅</button>
+        <button class="btn ghost" id="btn-chip" style="flex:1">🎁 چیپ</button>
+      </div>
     </div>`;
-  v.querySelector('#fmt').onchange = e => {
-    state.draft.formation = FORMATIONS.find(x => x.id === e.target.value);
+  v.querySelectorAll('#fmtseg button').forEach(b => b.onclick = () => {
+    haptic();
+    state.draft.formation = FORMATIONS.find(x => x.id === b.dataset.f);
     drawPitch();
-  };
+  });
   v.querySelector('#btn-save').onclick = saveSquad;
   v.querySelector('#btn-chip').onclick = chipSheet;
   v.querySelectorAll('.pj').forEach(el => {
     el.onclick = () => {
-      const idx = +el.dataset.idx, s = d.slots[idx];
-      if (s.player) slotSheet(idx);
-      else pickSheet(idx);
+      haptic();
+      if (el.dataset.idx !== undefined && el.dataset.idx !== 'undefined') {
+        const idx = +el.dataset.idx, s = d.slots[idx];
+        if (s.player) return slotSheet(idx);
+        return pickSheet(idx);
+      }
+      pickSheet(-1, el.dataset.pos || null);
     };
   });
 }
-function pjHtml(s, bench = false) {
+function pjHtml(s, ptsMap, pos) {
   const p = s.player;
-  const cap = s.is_captain ? '<span class="cap">🅲</span>' : s.is_vice ? '<span class="cap" style="opacity:.6">🆅</span>' : '';
-  if (!p) return `<button class="pj empty ${bench ? '' : ''}" data-idx="${s.i ?? s.slot - 1}"><span class="shirt">+</span><span class="nm">${bench ? 'ذخیره' : 'انتخاب'}</span></button>`;
-  return `<button class="pj ${p.pos === 'GKP' ? 'gkp' : ''} ${s.is_captain ? 'capt' : ''}" data-idx="${s.i ?? s.slot - 1}">
-    ${cap}<span class="pt num">${money(p.price)}</span><span class="shirt">${p.pos[0]}</span><span class="nm">${p.fa_name}</span></button>`;
+  const cap = s.is_captain ? '<span class="cap">©️</span>' : s.is_vice ? '<span class="cap" style="opacity:.55">Ⓥ</span>' : '';
+  if (!p) return `<button class="pj empty" data-pos="${pos || ''}"><span class="shirt">＋</span><span class="nm">${pos ? posFa[pos] : 'انتخاب'}</span></button>`;
+  const pts = ptsMap ? ptsMap[p.id] : null;
+  const ptPill = pts !== null && pts !== undefined
+    ? `<span class="pt num ${pts > 0 ? 'plus' : pts < 0 ? 'minus' : ''}">${pts > 0 ? '+' : ''}${faNum(pts)}</span>`
+    : `<span class="pt num">${money(p.price)}</span>`;
+  const shirtInner = p.portrait ? `<img src="${p.portrait}" alt="" loading="lazy" onerror="this.remove()">` : p.pos[0];
+  return `<button class="pj ${s.is_captain ? 'capt' : ''}" data-idx="${s.i ?? s.slot - 1}">
+    ${cap}${ptPill}<span class="shirt" style="${kitStyle(p)}">${shirtInner}</span><span class="nm">${p.fa_name}</span></button>`;
 }
 function slotSheet(idx) {
   const s = state.draft.slots[idx];
@@ -366,25 +490,23 @@ function slotSheet(idx) {
   };
   document.getElementById('a-del').onclick = () => { removeFromDraft(idx); closeSheet(); };
 }
-function pickSheet(idx) {
+function pickSheet(idx, onlyPos) {
   const t = draftTotals();
-  const posOrder = ['GKP', 'DEF', 'MID', 'FWD'];
-  const need = state.draft.slots[idx];
-  // suggest: any position for starting slots; for bench fill remaining quotas
-  const candidates = state.players
+  let candidates = state.players
     .filter(p => !state.draft.slots.some(s => s.player?.id === p.id))
-    .filter(p => p.price <= t.bank)
-    .sort((a, b) => b.price - a.price).slice(0, 30);
-  sheet(`<h3>انتخاب بازیکن</h3><div style="max-height:50dvh;overflow-y:auto">
-    ${candidates.map(c => `<div class="pl-card" data-pid="${c.id}">${playerCardInner(c)}</div>`).join('')}</div>`);
+    .filter(p => p.price <= t.bank);
+  if (onlyPos && ['GKP', 'DEF', 'MID', 'FWD'].includes(onlyPos)) candidates = candidates.filter(p => p.pos === onlyPos);
+  candidates = candidates.sort((a, b) => b.price - a.price).slice(0, 30);
+  sheet(`<h3>انتخاب ${onlyPos ? posFa[onlyPos] : 'بازیکن'}</h3><div style="max-height:50dvh;overflow-y:auto">
+    ${candidates.map(c => `<div class="pl-card" data-pid="${c.id}">${playerCardInner(c)}</div>`).join('') || '<p class="muted small">گزینه‌ای در بودجه نیست.</p>'}</div>`);
   document.querySelectorAll('[data-pid]').forEach(el => el.onclick = () => {
+    haptic();
     addToDraft(state.players.find(p => p.id === +el.dataset.pid));
     closeSheet();
   });
 }
 function playerCardInner(p) {
-  const [c1, c2] = POS_COLORS[p.pos];
-  return `<div class="pl-ava" style="background:linear-gradient(135deg,${c1},${c2})">${p.pos}</div>
+  return `${avatar(p)}
     <div class="pl-info"><div class="pl-name">${p.fa_name}</div>
     <div class="pl-club">${p.club} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
     <div class="pl-price">${money(p.price)}</div>`;
@@ -423,79 +545,104 @@ function chipSheet() {
 async function renderMyPoints(gwId) {
   const v = document.getElementById('view');
   const d = await api('/my-points' + (gwId ? '/' + gwId : ''));
-  v.innerHTML = `<div class="hero-grad"></div>
-    <div class="stat-grid">
-      <div class="stat pop"><div class="v">${faNum(d.total)}</div><div class="k">امتیاز هفته ${faNum(d.gwId)}</div></div>
+  v.innerHTML = `
+    <div class="card glow" style="text-align:center">
+      <div class="eyebrow" style="justify-content:center">هفته ${faNum(d.gwId)}</div>
+      <div class="num gold-t pop" style="font-size:52px;font-weight:700;line-height:1" id="gw-total">0</div>
+      <div class="muted small">امتیاز این هفته</div>
     </div>
-    <div class="card">${d.players.map(p => `
-      <div class="lb-row"><div class="lb-pos ${p.slot <= 11 ? '' : 'muted'}">${faNum(p.slot)}</div>
-      <div class="lb-name"><div class="n">${p.fa_name} ${p.pts > 0 ? `<b class="num" style="color:var(--green)">+${faNum(p.pts)}</b>` : p.pts < 0 ? `<b class="num" style="color:var(--red)">${faNum(p.pts)}</b>` : ''}</div>
-      <div class="muted small">${p.club} · ${posFa[p.pos]} · ${faNum(p.minutes || 0)}'${p.goals ? ` · ⚽${faNum(p.goals)}` : ''}${p.assists ? ` · 🅰${faNum(p.assists)}` : ''}</div></div></div>`).join('')}
+    <div class="card"><div class="h-title">🧩 ترکیب و امتیازها</div>${d.players.map(p => `
+      <div class="lb-row"><div class="lb-pos">${faNum(p.slot)}</div>
+      <div class="lb-name"><div class="n">${p.fa_name} ${p.pts > 0 ? `<b class="num green-t">+${faNum(p.pts)}</b>` : p.pts < 0 ? `<b class="num red-t">${faNum(p.pts)}</b>` : ''}</div>
+      <div class="muted small">${p.club} · ${posFa[p.pos]} · ${faNum(p.minutes || 0)} دقیقه${p.goals ? ` · ⚽ ${faNum(p.goals)}` : ''}${p.assists ? ` · 🅰️ ${faNum(p.assists)}` : ''}${p.bonus ? ` · ⭐ ${faNum(p.bonus)}` : ''}</div></div></div>`).join('')}
     </div>`;
+  countUp(v.querySelector('#gw-total'), d.total);
 }
 
 /* ============ FIXTURES ============ */
 async function renderFixtures(gwId) {
   const v = document.getElementById('view');
   const d = await api('/fixtures' + (gwId ? '/' + gwId : ''));
-  const { rows } = { rows: null };
-  const gws = Array.from({ length: 5 }, (_, i) => d.gwId - 2 + i).filter(g => g >= 1);
-  v.innerHTML = `<div class="hero-grad"></div>
-    <div class="chips">${gws.map(g => `<button class="chip ${g === d.gwId ? 'on' : ''}" data-gw="${g}">هفته ${faNum(g)}</button>`).join('')}</div>
+  const gws = Array.from({ length: 7 }, (_, i) => d.gwId - 3 + i).filter(g => g >= 1 && g <= 34);
+  const live = d.fixtures.filter(f => !f.finished).length;
+  v.innerHTML = `
+    <div class="row between" style="margin-bottom:4px">
+      <div><div class="eyebrow">تقویم لیگ برتر</div>
+      <div style="font-size:19px;font-weight:800">📅 بازی‌های هفته ${faNum(d.gwId)}</div></div>
+      ${live ? `<div class="pill live">● ${faNum(live)} بازی پیش‌رو</div>` : `<div class="pill">پایان هفته</div>`}
+    </div>
+    <div class="chips">${gws.map(g => `<button class="chip ${g === d.gwId ? 'on' : ''}" data-gw="${g}">${faNum(g)}</button>`).join('')}</div>
     ${d.fixtures.map(f => `
       <div class="fx">
         <div class="t a">${f.home}</div>
-        <div class="sc ${f.finished ? '' : 'live'}">${f.finished ? `${faNum(f.home_goals)} - ${faNum(f.away_goals)}` : new Date(f.kickoff).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>
+        <div class="mid"><div class="sc ${f.finished ? 'ft' : ''}">${f.finished ? `${faNum(f.home_goals)} - ${faNum(f.away_goals)}` : jtime(f.kickoff)}</div>
+        <div class="dt">${f.finished ? 'پایان' : jdate(f.kickoff)}</div></div>
         <div class="t b">${f.away}</div>
-      </div>`).join('') || '<p class="muted small">بازی‌ای ثبت نشده.</p>'}`;
-  v.querySelectorAll('[data-gw]').forEach(b => b.onclick = () => renderFixtures(+b.dataset.gw));
+      </div>`).join('') || '<div class="empty"><div class="big">📅</div><p>بازی‌ای ثبت نشده.</p></div>'}`;
+  v.querySelectorAll('[data-gw]').forEach(b => b.onclick = () => { haptic(); renderFixtures(+b.dataset.gw); });
 }
 
 /* ============ LEAGUES ============ */
 async function renderLeagues() {
   const v = document.getElementById('view');
   const list = await api('/leagues').catch(() => []);
-  v.innerHTML = `<div class="hero-grad"></div>
+  v.innerHTML = `
     <div class="row" style="gap:10px;margin-bottom:14px">
       <button class="btn" id="btn-new" style="flex:1">🏟 لیگ جدید</button>
       <button class="btn ghost" id="btn-join" style="flex:1">🔑 عضویت با کد</button>
     </div>
-    ${list.length ? list.map(l => `<div class="pl-card" data-lg="${l.id}">
-      <div class="pl-ava" style="background:linear-gradient(135deg,#fde047,#eab308)">🏆</div>
-      <div class="pl-info"><div class="pl-name">${l.name}</div><div class="pl-club">${faNum(l.members)} بازیکن · کد: ${l.code}</div></div></div>`).join('')
-      : '<div class="card"><p class="muted small" style="line-height:2">هنوز لیگی نداری! یک لیگ بساز، کدش را با دوستانت قسمت کن و ببینید کی بهتر تیم می‌چیند. 😎</p></div>'}`;
-  v.querySelector('#btn-new').onclick = () => sheet(`<h3>لیگ جدید</h3>
+    ${list.length ? `<div class="card"><div class="h-title">لیگ‌های من</div>` + list.map(l => `<div class="pl-card" data-lg="${l.id}">
+      <div class="pl-ava" style="background:linear-gradient(135deg,#ffe08a,#f5c518);font-size:20px">🏆</div>
+      <div class="pl-info"><div class="pl-name">${l.name}</div><div class="pl-club">${faNum(l.members)} مدیر · کد ${l.code}</div></div></div>`).join('') + '</div>'
+      : `<div class="card"><div class="empty"><div class="big">🏟</div>
+        <p>هنوز لیگی نداری! یک لیگ بساز، کدش را با دوستانت قسمت کن و ببین کی بهتر تیم می‌چیند.</p>
+        <button class="btn sm" id="btn-new2">ساخت اولین لیگ</button></div></div>`}`;
+  const mkNew = () => sheet(`<h3>🏟 لیگ جدید</h3>
     <input id="ln" type="text" placeholder="نام لیگ (مثلاً همکاران اداره)">
-    <p class="muted small" style="margin:10px 0">کد ۶ حرفی ساخته می‌شود؛ به دوستانت بده.</p>
-    <button class="btn" id="mk">ساخت لیگ</button>`) || (document.getElementById('mk').onclick = async () => {
+    <p class="muted small" style="margin:10px 0">کد ۶ حرفی ساخته می‌شود؛ به دوستانت بده تا با <b>/join</b> عضو شوند.</p>
+    <button class="btn" id="mk">ساخت لیگ 🚀</button>`) || (document.getElementById('mk').onclick = async () => {
       try {
         const l = await api('/league', { method: 'POST', body: JSON.stringify({ name: document.getElementById('ln').value }) });
         closeSheet(); confetti();
         renderLeague(l.id);
       } catch (e) { toast(e.message, 'err'); }
     });
-  v.querySelector('#btn-join').onclick = () => sheet(`<h3>عضویت با کد</h3>
-    <input id="jc" type="text" placeholder="کد ۶ حرفی" style="letter-spacing:6px;text-align:center;font-family:var(--font-num)">
-    <button class="btn" id="jk" style="margin-top:12px">عضویت</button>`) || (document.getElementById('jk').onclick = async () => {
+  v.querySelector('#btn-new').onclick = () => { haptic(); mkNew(); };
+  const n2 = v.querySelector('#btn-new2'); if (n2) n2.onclick = () => { haptic(); mkNew(); };
+  v.querySelector('#btn-join').onclick = () => { haptic(); sheet(`<h3>عضویت با کد دعوت</h3>
+    <input id="jc" type="text" placeholder="کد ۶ حرفی" style="letter-spacing:6px;text-align:center;font-family:var(--font-num);font-size:18px">
+    <button class="btn" id="jk" style="margin-top:12px">عضویت در لیگ ✅</button>`) || (document.getElementById('jk').onclick = async () => {
       try {
         const l = await api('/league/join', { method: 'POST', body: JSON.stringify({ code: document.getElementById('jc').value }) });
         toast('به لیگ اضافه شدی! ✅', 'ok'); closeSheet(); renderLeague(l.id);
       } catch (e) { toast(e.message, 'err'); }
-    });
-  v.querySelectorAll('[data-lg]').forEach(el => el.onclick = () => renderLeague(+el.dataset.lg));
+    }); };
+  v.querySelectorAll('[data-lg]').forEach(el => el.onclick = () => { haptic(); renderLeague(+el.dataset.lg); });
 }
 
 async function renderLeague(id) {
   const v = document.getElementById('view');
   const t = await api('/league/' + id);
-  v.innerHTML = `<div class="hero-grad"></div>
-    <div class="card glow">
-      <div class="h-title">🏆 ${t.league.name}</div>
+  const myId = state.me?.entry?.id;
+  v.innerHTML = `
+    <div class="card glow" style="text-align:center">
+      <div style="font-size:38px">🏆</div>
+      <div class="h-title" style="justify-content:center;margin:6px 0 2px">${t.league.name}</div>
+      <p class="muted small">${faNum(t.members.length)} مدیر در این لیگ</p>
       <div class="code-box"><span class="muted small">کد دعوت</span><b>${t.league.code}</b>
-      <button class="btn sm ghost" id="share">مشارکت</button></div>
+      <button class="btn sm ghost" id="copy">کپی</button></div>
+      <button class="btn sm" id="share" style="margin-top:10px">📤 دعوت دوستان</button>
     </div>
-    ${t.members.map((m, i) => lbRow({ team_name: m.team_name, first_name: m.username || '', total_points: m.total }, i)).join('')}`;
+    <div class="card"><div class="h-title">جدول لیگ</div>
+    ${t.members.map((m, i) => lbRow({ team_name: m.team_name, first_name: m.username || '', total_points: m.total, gw_points: m.gw, entry_id: m.entry_id }, i, myId)).join('')}</div>`;
+  const copyBtn = document.getElementById('copy');
+  copyBtn.onclick = async () => {
+    haptic();
+    try { await navigator.clipboard.writeText(t.league.code); toast('کد کپی شد ✅', 'ok'); }
+    catch { toast('کپی نشد — کد: ' + t.league.code, 'err'); }
+  };
   document.getElementById('share').onclick = () => {
+    haptic();
     const url = `https://t.me/share/url?url=${encodeURIComponent(cfgLink())}&text=${encodeURIComponent(`توی فانتزی لیگ برتر بیا! کد لیگ: ${t.league.code}`)}`;
     tg?.openTelegramLink(url);
   };
@@ -506,10 +653,15 @@ function cfgLink() { return location.origin + location.pathname; }
 async function renderLeaderboard() {
   const v = document.getElementById('view');
   const lb = await api('/leaderboard');
-  v.innerHTML = `<div class="hero-grad"></div>
+  const myId = state.me?.entry?.id;
+  v.innerHTML = `
     <div class="card glow" style="text-align:center">
-      <div style="font-size:34px">🥇</div><div class="h-title" style="justify-content:center">لیدربورد کل</div>
-    </div>${lb.map((r, i) => lbRow(r, i)).join('')}`;
+      <div style="font-size:38px">🥇</div>
+      <div class="h-title" style="justify-content:center;margin:6px 0 2px">لیدربورد کل ایران</div>
+      <p class="muted small">${faNum(lb.length)} مدیر در رقابت</p>
+    </div>
+    <div class="card"><div class="h-title">جدول کلی</div>
+    ${lb.map((r, i) => lbRow(r, i, myId)).join('') || '<div class="empty"><div class="big">🏟</div><p>هنوز رقابتی شروع نشده.</p></div>'}</div>`;
 }
 
 /* ============ PROFILE ============ */
@@ -517,21 +669,21 @@ async function renderProfile() {
   const v = document.getElementById('view');
   const me = await api('/me');
   state.me = me;
-  v.innerHTML = `<div class="hero-grad"></div>
+  v.innerHTML = `
     <div class="card glow" style="text-align:center">
-      <div style="font-size:40px">👤</div>
-      <div class="h-title" style="justify-content:center;margin-top:8px">${me.user.name || 'بازیکن'}</div>
-      <p class="muted small">${me.user.username ? '@' + me.user.username : ''} · ID: <span class="num">${me.user.id}</span></p>
-      <div class="row" style="justify-content:center;gap:14px;margin-top:10px">
-        <div><b class="num" style="font-size:20px;color:var(--gold2)">${faNum(me.entry.total_points)}</b><div class="muted small">امتیاز</div></div>
-        <div><b class="num" style="font-size:20px">${faNum(me.entry.overall_rank || '—')}</b><div class="muted small">رتبه</div></div>
-        <div><b class="num" style="font-size:20px">${faNum(me.leagues)}</b><div class="muted small">لیگ</div></div>
+      <div style="font-size:44px">👤</div>
+      <div class="h-title" style="justify-content:center;margin:8px 0 2px">${me.user.name || 'بازیکن'}</div>
+      <p class="muted small" style="margin:0 0 12px">${me.user.username ? '@' + me.user.username : ''} · <span class="num">${me.user.id}</span></p>
+      <div class="row" style="justify-content:center;gap:22px;margin-top:6px">
+        <div><b class="num gold-t" style="font-size:22px" id="pf-pts">0</b><div class="muted small">امتیاز</div></div>
+        <div><b class="num" style="font-size:22px">${faNum(me.entry.overall_rank || '—')}</b><div class="muted small">رتبه</div></div>
+        <div><b class="num" style="font-size:22px">${faNum(me.leagues)}</b><div class="muted small">لیگ</div></div>
       </div>
     </div>
     <div class="card">
       <div class="h-title">📝 نام تیم</div>
-      <input id="tn" type="text" value="${me.entry.team_name || ''}">
-      <button class="btn sm" id="savetn" style="margin-top:10px">ذخیره</button>
+      <input id="tn" type="text" value="${(me.entry.team_name || '').replace(/"/g, '&quot;')}">
+      <button class="btn sm" id="savetn" style="margin-top:10px">ذخیره نام</button>
     </div>
     <div class="card">
       <div class="h-title">⚖️ قوانین امتیازدهی</div>
@@ -550,27 +702,42 @@ async function renderProfile() {
       <div class="admin-stat"><span>بهترین بازیکن زمین (BPS)</span><b class="num">۳/۲/۱</b></div>
     </div>`;
   document.getElementById('savetn').onclick = async () => {
-    // reuse squad save with teamName only — send existing squad
+    haptic();
     const slots = me.squad.map(s => ({ player_id: s.player_id, slot: s.slot, is_captain: s.is_captain, is_vice: s.is_vice }));
     if (slots.length === 15) {
       await api('/squad', { method: 'POST', body: JSON.stringify({ slots, teamName: document.getElementById('tn').value }) });
       toast('ذخیره شد ✅', 'ok');
     } else toast('اول تیم ۱۵ نفره را بساز', 'err');
   };
+  countUp(document.getElementById('pf-pts'), me.entry.total_points || 0);
 }
 
 /* ============ ADMIN ============ */
 async function renderAdmin() {
   const v = document.getElementById('view');
-  v.innerHTML = `<div class="hero-grad"></div>
+  v.innerHTML = `
     <div class="card"><div class="h-title">⚙️ پنل مدیریت</div>
-      <button class="btn sm" id="a-sync" style="margin-bottom:8px">sync فیکسچرهای فصل</button>
+      <div class="eyebrow">داده‌ها (خودکار)</div>
+      <button class="btn sm" id="a-syncv3" style="margin-bottom:8px">sync نتایج فصل از ورزش‌سه</button>
+      <button class="btn sm green" id="a-auto" style="margin-bottom:8px">استخراج خودکار آمار (۲ بازی)</button>
+      <button class="btn sm ghost" id="a-pend" style="margin-bottom:8px">بازی‌های در انتظار آمار</button>
+      <div id="a-out" class="small muted" style="margin-bottom:8px;line-height:2"></div>
+      <div class="eyebrow">دستی</div>
       <input id="a-gw" type="text" placeholder="شماره هفته برای finish" style="margin-bottom:8px">
       <button class="btn sm red" id="a-finish">بستن هفته و محاسبه امتیاز</button>
-      <p class="muted small" style="margin-top:10px">ورود آمار بازیکنان از طریق /admin signal در بات.</p>
+      <p class="muted small" style="margin-top:10px">ورود دستی آمار: /admin signal در بات.</p>
     </div>`;
-  document.getElementById('a-sync').onclick = async () => {
-    try { const r = await api('/admin/sync-season', { method: 'POST' }); toast(`sync: ${r.fixtures} جدید، ${r.updated} آپدیت`, 'ok'); }
+  const out = t => document.getElementById('a-out').textContent = t;
+  document.getElementById('a-syncv3').onclick = async () => {
+    try { out('در حال sync...'); const r = await api('/admin/sync-v3', { method: 'POST' }); out(`نتایج: ${faNum(r.fixtures)} جدید، ${faNum(r.updated)} آپدیت`); toast('sync شد ✅', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  document.getElementById('a-auto').onclick = async () => {
+    try { out('در حال استخراج آمار ۲ بازی... (۱-۳ دقیقه)'); const r = await api('/admin/auto-ingest', { method: 'POST', body: JSON.stringify({ limit: 2 }) }); out(r.map(x => `بازی ${x.fixture}: ${x.status}`).join(' | ')); toast('انجام شد ✅', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  document.getElementById('a-pend').onclick = async () => {
+    try { const r = await api('/admin/pending'); out(r.length ? r.map(f => `${f.home} - ${f.away} (هفته ${faNum(f.gw_id)})`).join('، ') : 'همه بازی‌ها آمار دارند ✅'); }
     catch (e) { toast(e.message, 'err'); }
   };
   document.getElementById('a-finish').onclick = async () => {

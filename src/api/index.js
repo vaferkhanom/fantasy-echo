@@ -139,7 +139,7 @@ router.get('/league/:id', async (req, res) => {
 // Leaderboard
 router.get('/leaderboard', async (req, res) => {
   const { rows } = await query(`
-    SELECT e.team_name, e.total_points, e.gw_points, e.overall_rank, u.first_name, u.username, u.photo_url
+    SELECT e.id AS entry_id, e.team_name, e.total_points, e.gw_points, e.overall_rank, u.first_name, u.username, u.photo_url
     FROM entries e JOIN users u ON u.id=e.user_id
     ORDER BY e.total_points DESC, e.gw_points DESC LIMIT 100`);
   res.json(rows);
