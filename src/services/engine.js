@@ -71,9 +71,9 @@ async function upsertSignal(gwId, playerId, signalObj, adminId) {
     [gwId, playerId, JSON.stringify(signalObj), adminId]);
   console.log('[signal] upsert stats_gw');
   await query(
-    `INSERT INTO stats_gw (gw_id, player_id) VALUES ($${n + 1}, $${n + 2})
+    `INSERT INTO stats_gw (gw_id, player_id) VALUES ($1, $2)
      ON CONFLICT (gw_id, player_id) DO NOTHING`,
-    all);
+    [gwId, playerId]);
   console.log('[signal] update stats_gw');
   await query(
     `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${n + 1} AND player_id=$${n + 2}`, all);
