@@ -177,16 +177,19 @@ router.post('/admin/diag2', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const out = {};
   try {
+    const t = req.body.table || 'points';
     const { rows: cons } = await query(
-      `SELECT conname, contype FROM pg_constraint WHERE conrelid='stats_gw'::regclass`);
+      `SELECT conname, contype, pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid=$1::regclass`, [t]);
     out.constraints = cons;
-    const { rows: cols } = await query(
-      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name='stats_gw' ORDER BY ordinal_position`);
-    out.columns = cols.map(c => c.column_name + ':' + c.data_type);
-    await query(`INSERT INTO stats_gw (gw_id, player_id, minutes) VALUES (99, 9999, 0) ON CONFLICT (gw_id, player_id) DO NOTHING`);
-    out.plainInsert = 'ok';
-    await query(`DELETE FROM stats_gw WHERE gw_id=99 AND player_id=9999`);
-    out.cleanup = 'ok';
+    const { rows: trg } = await query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid=$1::regclass AND NOT tgisinternal`, [t]);
+    out.triggers = trg;
+    const { rows: rul } = await query(
+      `SELECT rulename FROM pg_rules WHERE tablename=$1`, [t]);
+    out.rules = rul;
+    const { rows: idx } = await query(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename=$1`, [t]);
+    out.indexes = idx;
     res.json(out);
   } catch (e) {
     out.error = e.message;
