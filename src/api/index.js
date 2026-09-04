@@ -173,6 +173,36 @@ router.get('/my-points', async (req, res) => {
 });
 
 // Admin
+router.post('/admin/diag', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const t = {};
+  const mark = k => { t[k] = Date.now(); };
+  try {
+    mark('start');
+    const c1 = await query(`SELECT count(*)::int AS n FROM admin_signals`);
+    mark('count_signals');
+    const c2 = await query(`SELECT count(*)::int AS n FROM stats_gw`);
+    mark('count_stats');
+    let locks = [];
+    try {
+      const { rows } = await query(
+        `SELECT locktype, mode, pid, granted FROM pg_locks WHERE NOT granted LIMIT 20`);
+      locks = rows;
+    } catch (e) { locks = [{ err: e.message }]; }
+    mark('locks');
+    let act = [];
+    try {
+      const { rows } = await query(
+        `SELECT pid, state, wait_event_type, wait_event, left(query,120) AS q
+         FROM pg_stat_activity WHERE datname='railway' AND pid <> pg_backend_pid() LIMIT 20`);
+      act = rows;
+    } catch (e) { act = [{ err: e.message }]; }
+    mark('activity');
+    res.json({ t, signals: c1.rows[0].n, stats: c2.rows[0].n, locks, act });
+  } catch (e) {
+    res.status(500).json({ error: e.message, t });
+  }
+});
 router.post('/admin/seed-data', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const { seedClubsAndPlayers } = require('../seed');
