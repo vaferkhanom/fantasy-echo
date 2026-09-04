@@ -217,11 +217,24 @@ router.post('/admin/finish-gw/:gw', async (req, res) => {
   const r = await finishGw(Number(req.params.gw), { bonus: req.body.bonus !== false });
   res.json(r);
 });
+let ingestRunning = false;
 router.post('/admin/auto-ingest', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  if (ingestRunning) return res.json({ started: false, reason: 'already-running' });
+  ingestRunning = true;
   const { autoIngestCycle } = require('../services/ingest/auto');
-  const r = await autoIngestCycle(Math.min(9, Math.max(1, Number(req.body.limit) || 2)));
-  res.json(r);
+  const limit = Math.min(9, Math.max(1, Number(req.body.limit) || 2));
+  autoIngestCycle(limit)
+    .then(r => console.log('[auto-ingest] done:', JSON.stringify(r).slice(0, 400)))
+    .catch(e => console.log('[auto-ingest] error:', e && e.message))
+    .finally(() => { ingestRunning = false; });
+  res.json({ started: true, limit });
+});
+router.get('/admin/ingest-status', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { pendingFixtures } = require('../services/ingest/auto');
+  const pend = await pendingFixtures(50);
+  res.json({ running: ingestRunning, pending: pend.length });
 });
 router.get('/admin/pending', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });

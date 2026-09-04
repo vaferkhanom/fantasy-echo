@@ -307,19 +307,26 @@ async function pendingFixtures(limit = 10) {
   return rows;
 }
 
+let cycleRunning = false;
 async function autoIngestCycle(limit = 2) {
-  const work = await pendingFixtures(10);
-  const results = [];
-  for (const fx of work.slice(0, limit)) {
-    try {
-      await query(`UPDATE fixtures SET locked_at=now() WHERE id=$1`, [fx.id]);
-      const r = await processFixture(fx);
-      results.push({ fixture: fx.id, gw: fx.gw_id, ...r });
-    } catch (e) {
-      results.push({ fixture: fx.id, gw: fx.gw_id, status: 'error', notes: (e && e.message || '').slice(0, 160) });
+  if (cycleRunning) return [{ status: 'already-running' }];
+  cycleRunning = true;
+  try {
+    const work = await pendingFixtures(10);
+    const results = [];
+    for (const fx of work.slice(0, limit)) {
+      try {
+        await query(`UPDATE fixtures SET locked_at=now() WHERE id=$1`, [fx.id]);
+        const r = await processFixture(fx);
+        results.push({ fixture: fx.id, gw: fx.gw_id, ...r });
+      } catch (e) {
+        results.push({ fixture: fx.id, gw: fx.gw_id, status: 'error', notes: (e && e.message || '').slice(0, 160) });
+      }
     }
+    return results;
+  } finally {
+    cycleRunning = false;
   }
-  return results;
 }
 
 module.exports = { autoIngestCycle, pendingFixtures, processFixture, normalizeFa, teamMatch, parseMatchDetail };
