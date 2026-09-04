@@ -14,6 +14,38 @@ async function fetchHtml(url) {
   return res.text();
 }
 
+const API = 'https://web-api.varzesh3.com/v2.0';
+async function apiGet(path) {
+  const res = await fetch(API + path, {
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(25000)
+  });
+  if (!res.ok) throw new Error(`v3api ${res.status}`);
+  return res.json();
+}
+
+const SEASON = 903038, LEAGUE = 6;
+
+/* All played rounds: [{round:'هفته N', matches:[{id, week?, host:{id,name}, guest, goals:{host,guest}, status, date, time}]}] */
+async function resultsAll() {
+  const rounds = new Map();
+  for (const skip of [0, 9, 18, 27, 36, 45]) {
+    let data;
+    try { data = await apiGet(`/football/leagues/${LEAGUE}/seasons/${SEASON}/results?skip=${skip}`); }
+    catch (e) { break; }
+    if (!data.items || !data.items.length) break;
+    for (const r of data.items) {
+      if (!rounds.has(r.round)) rounds.set(r.round, r);
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  return [...rounds.values()];
+}
+
+async function matchDetail(v3id) {
+  return apiGet(`/football/matches/${v3id}`);
+}
+
 function cleanText(html) {
   let t = html.replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ');
@@ -84,4 +116,4 @@ async function matchReport(path) {
   return { head, events, lineup, bench, teamStats };
 }
 
-module.exports = { fetchHtml, cleanText, leagueMatches, matchReport };
+module.exports = { fetchHtml, cleanText, leagueMatches, matchReport, apiGet, resultsAll, matchDetail, SEASON, LEAGUE };

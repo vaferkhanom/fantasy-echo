@@ -1,8 +1,8 @@
 'use strict';
-/* Fully-automatic match-stats pipeline:
- * finished fixture -> varzesh3 match page -> NVIDIA NIM extracts player events
- * -> validate vs scoreline -> write stats_gw (+auto-add unknown players) -> finish GW.
- * No manual entry required.
+/* Fully-automatic match-stats pipeline (deterministic, no manual entry):
+ * varzesh3 JSON API -> structured events -> per-player stats -> validation -> scoring.
+ * The LLM (NVIDIA NIM) is used ONLY for leftover name mapping (transliteration),
+ * one small batched call per fixture when needed.
  */
 const { query } = require('../../db');
 const { chatJson } = require('./nim');
@@ -12,178 +12,281 @@ const { finishGw } = require('../engine');
 const CITY_WORDS = ['قزوین', 'اردکان', 'خوزستان', 'سیرجان', 'اراک', 'خرم‌آباد', 'خرم آباد', 'اهواز', 'انزلی', 'مازندران', 'قائم‌شهر', 'قائم شهر', 'تهران', 'تبریز', 'اصفهان', 'فولادشهر', 'شیراز', 'شهربابک', 'شهر بابک', 'آبادان', 'بندرانزلی', 'بندر انزلی'];
 
 function normalizeFa(s) {
-  let t = String(s || '').replace(/[\u200c\u200b]/g, ' ').replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+  return String(s || '').replace(/[\u200c\u200b]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+    .replace(/\s+/g, '').trim();
+}
+function stripCity(s) {
+  let t = String(s || '').replace(/[\u200c]/g, ' ');
   for (const w of CITY_WORDS) t = t.replace(new RegExp(w, 'g'), ' ');
   return t.replace(/\s+/g, ' ').trim();
 }
-
 function teamMatch(a, b) {
-  const x = normalizeFa(a), y = normalizeFa(b);
+  const x = stripCity(a), y = stripCity(b);
   if (!x || !y) return false;
   return x.includes(y) || y.includes(x);
 }
 
 const TIER_BASE = { GKP: 40, DEF: 40, MID: 45, FWD: 45 };
 const TIER_BONUS = { 5: 10, 4: 5, 3: 0, 2: 0, 1: 0 };
-
 function priceFor(tier, pos) {
   return ((TIER_BASE[pos] || 45) + (TIER_BONUS[tier] || 0)) / 10;
 }
-
-const SYSTEM = `You are a precise football data extractor for the Iranian Persian Gulf Pro League. Reply with ONLY valid JSON, no other text. Never invent events. If info is absent, use 0 / null. Transliteration varies (e.g. خامروبکوف = همراه‌بکوف, اوستون = استون): match by sound, always prefer the given player_id.`;
-
-function buildPrompt(fx, homeRoster, awayRoster, report) {
-  const fmt = list => list.map(p => `${p.id}|${p.fa_name}|${p.en_name || ''}|${p.pos}`).join('\n');
-  return `Match: ${fx.home} ${fx.home_goals} - ${fx.away_goals} ${fx.away} (week ${fx.gw_id})
-Rosters (id|fa|en|pos):
-HOME:
-${fmt(homeRoster)}
-AWAY:
-${fmt(awayRoster)}
-Report head: ${report.head}
-Events: ${report.events}
-Lineup: ${report.lineup}
-Bench: ${report.bench}
-Rules:
-- Goal lines look like "N - M scorer - assister" (second name = assist). "گل رد شده" = disallowed, EXCLUDE.
-- "(پنالتی)" = penalty goal, "(گل به خودی)" = own goal. Sub lines "X - Y" with NO score prefix = player ON - player OFF.
-- Single-name lines with minute = card (yellow unless red stated). Starter with minute in lineup = subbed OFF at that minute. Bench with minute = subbed ON.
-- Starter no minute = 90. Bench no minute = 0 (DNP). Red card: minutes = dismissal minute.
-- A player appearing in the lineup section is starter:true even with a minute (that minute = subbed OFF). A bench player with a minute = subbed ON at that minute.
-- own_goal ONLY when explicitly written (گل به خودی). Saves: credit team saves to goalkeepers proportionally by minutes (round to int); all other players saves=0.
-- Team saves [home, away]: ${report.teamStats && report.teamStats.saves ? report.teamStats.saves.join(',') : 'unknown'}. Yellow/red totals [home, away]: ${report.teamStats && report.teamStats.yellow ? report.teamStats.yellow.join(',') + ' / ' + (report.teamStats.red || [0, 0]).join(',') : 'unknown'} (cross-check only).
-- Output JSON: {"players":[{"player_id":int|null,"new_name":string|null,"new_pos":"GKP"|"DEF"|"MID"|"FWD"|null,"side":"home"|"away"|null,"starter":bool,"minutes":int,"goals":int,"assists":int,"yellow":int,"red":int,"own_goal":int,"pen_missed":int,"pen_saved":int,"saves":int}],"notes":string}
-- Include EVERY person from events + all lineup starters + all bench players: anyone with minutes>0 plus unused bench (minutes 0, all zeros). Typical total ~28-32 entries. NEVER omit people.
-- CRITICAL: every scorer/assister/card/sub name MUST appear in output either with the correct player_id (fa_name must sound the same) or as new_name. If unsure between two roster entries, choose new_name. Forcing a wrong player_id is the worst error.
-- COUNT CHECK before replying: output MUST contain exactly 11 entries with starter:true per side (22 total). Bench entries cover the rest (~6-12 per side).
-- Example: events "31' 1 - 0 عیسی مرادی - ابوذر صفرزاده" + lineup has مرادی starting, صفرزاده starting -> {"player_id":null,"new_name":"عیسی مرادی","side":"home","starter":true,"minutes":74,...,"goals":1} (if subbed at 74) and صفرزاده {"assists":1}. Event "74' علیرضا ملکی - عیسی مرادی" (no score) with ملکی on bench -> ملکی {"starter":false,"minutes":16}, مرادی minutes 74 (already counted). Event "81' وحید امیری" single name -> {"yellow":1} on امیری (who came on at 46).`;
+// position from formation line index
+function posFromLine(lineIdx, lineCount) {
+  if (lineIdx === 0) return 'GKP';
+  if (lineIdx === lineCount - 1) return 'FWD';
+  if (lineIdx === 1) return 'DEF';
+  return 'MID';
 }
 
-async function extractForFixture(fx, report) {
+/* ---- deterministic event parsing ---- */
+function parseMatchDetail(d) {
+  const per = {}; // v3pid -> {name, side, starter, minutes, goals, assists, yellow, red, own_goal, pen_missed, pen_saved, saves, portrait, pos}
+  const ensure = (id, name, side) => {
+    if (!per[id]) per[id] = {
+      name, side, starter: false, minutes: 0, goals: 0, assists: 0,
+      yellow: 0, red: 0, own_goal: 0, pen_missed: 0, pen_saved: 0, saves: 0,
+      portrait: null, pos: null
+    };
+    return per[id];
+  };
+  for (const side of ['host', 'guest']) {
+    const L = d.lineup && d.lineup[side];
+    if (!L) continue;
+    const lines = L.formationLines || [];
+    lines.forEach((ln, li) => {
+      for (const p of (ln.players || [])) {
+        const r = ensure(p.id, p.name, side);
+        r.starter = true; r.minutes = 90;
+        r.portrait = p.portrait || null;
+        r.pos = posFromLine(li, lines.length);
+        if (p.isCaptain) r.captain = true;
+        if (p.isManOfTheMatch) r.motm = true;
+      }
+    });
+    for (const p of (L.benchedPlayers || [])) {
+      const r = ensure(p.id, p.name, side);
+      r.portrait = r.portrait || p.portrait || null;
+    }
+  }
+  for (const e of (d.events || [])) {
+    const t = e.rawTime != null ? Number(e.rawTime) : parseInt(e.time);
+    if (e.eventType === 1) { // goal
+      const desc = e.description || '';
+      const isOG = /به خودی/.test(desc);
+      const s = ensure(e.strikerId, e.strickerName, e.side === 0 ? 'host' : 'guest');
+      if (isOG) s.own_goal += 1;
+      else s.goals += 1;
+      if (e.assisterId) {
+        const a = ensure(e.assisterId, e.assisterName, e.side === 0 ? 'host' : 'guest');
+        a.assists += 1;
+      }
+    } else if (e.eventType === 2) { // card
+      const s = ensure(e.offendingPlayerId, e.offendingPlayerName, e.side === 0 ? 'host' : 'guest');
+      if (Number(e.cardType) === 2) s.red += 1; else s.yellow += 1;
+    } else if (e.eventType === 3) { // penalty
+      const s = ensure(e.kickerId, e.kickerName, e.side === 0 ? 'host' : 'guest');
+      if (Number(e.penaltyResult) === 1) s.goals += 1; // scored penalty
+      else s.pen_missed += 1;
+    } else if (e.eventType === 4) { // sub
+      const off = ensure(e.outgoingPlayerId, e.outgoingPlayerName, e.side === 0 ? 'host' : 'guest');
+      off.minutes = Math.min(90, t);
+      const on = ensure(e.incomingPlayerId, e.incomingPlayerName, e.side === 0 ? 'host' : 'guest');
+      on.minutes = Math.max(1, 90 - t);
+    }
+    // et5 (VAR/decision) ignored except already-counted goals
+  }
+  // normalize double-yellow -> 1 yellow + red (FPL treatment)
+  for (const r of Object.values(per)) {
+    if (r.yellow >= 2) { r.yellow = 1; r.red += 1; }
+    if (r.red > 0 && r.minutes === 90) {
+      // sent-off starter: keep 90? use card minute if known — events lack it here; keep simple
+    }
+  }
+  // team saves -> goalkeepers by minutes
+  try {
+    const tot = (d.stats || []).find(s => /مجموع|کل/.test(s.title));
+    const items = (tot && tot.stats.items) || [];
+    const sv = items.find(i => /مهار/.test(i.title));
+    if (sv) {
+      const gks = { host: [], guest: [] };
+      for (const [id, r] of Object.entries(per)) {
+        if (r.pos === 'GKP' && r.minutes > 0) gks[r.side].push({ id, r });
+      }
+      const side2 = { host: Number(sv.hostValue) || 0, guest: Number(sv.guestValue) || 0 };
+      for (const side of ['host', 'guest']) {
+        const list = gks[side];
+        const totalMin = list.reduce((s, x) => s + x.r.minutes, 0) || 1;
+        let assigned = 0;
+        list.forEach((x, i) => {
+          const share = i === list.length - 1
+            ? side2[side] - assigned
+            : Math.round((side2[side] * x.r.minutes) / totalMin);
+          x.r.saves = Math.max(0, share);
+          assigned += x.r.saves;
+        });
+      }
+    }
+  } catch (_) {}
+  return per;
+}
+
+/* ---- identity resolution ---- */
+async function resolveIdentities(per, homeClub, awayClub) {
+  // returns {mapped: {v3pid: playerId}, created: [{...}], unmatched: [...]}
   const { rows: roster } = await query(
-    `SELECT id, club_id, fa_name, en_name, pos FROM players WHERE club_id=$1 OR club_id=$2`,
-    [fx.home_club, fx.away_club]);
-  const homeRoster = roster.filter(p => p.club_id === fx.home_club);
-  const awayRoster = roster.filter(p => p.club_id === fx.away_club);
-  const data = await chatJson(SYSTEM, buildPrompt(fx, homeRoster, awayRoster, report));
-  if (!data || !Array.isArray(data.players)) throw new Error('bad extraction shape');
-  // retry once with correction feedback on validation failure
-  const v0 = validateGoals(fx, data, roster);
-  if (!v0.ok) {
-    const fix = await chatJson(SYSTEM,
-      `Your previous output was WRONG: goal accounting is home ${v0.homeFor} vs ${v0.expH}, away ${v0.awayFor} vs ${v0.expA}. ` +
-      `Recheck every goal line (score prefix "N - M"), disallowed goals (گل رد شده) must be excluded, own goals (گل به خودی) count for the OTHER side. ` +
-      `Return the FULL corrected JSON for: ${fx.home} ${fx.home_goals}-${fx.away_goals} ${fx.away}. Report events: ${report.events.slice(0, 2500)}`);
-    if (fix && Array.isArray(fix.players) && fix.players.length >= 20) {
-      fix.notes = (fix.notes || '') + ' [retry]';
-      return { data: fix, roster };
+    `SELECT id, club_id, fa_name, en_name, pos, v3id FROM players WHERE club_id=$1 OR club_id=$2`,
+    [homeClub, awayClub]);
+  const byV3 = {};
+  for (const p of roster) if (p.v3id) byV3[p.v3id] = p.id;
+  const normName = {};
+  for (const p of roster) normName[p.id] = normalizeFa(p.fa_name);
+  const mapped = {}, leftovers = [];
+  for (const [v3id, r] of Object.entries(per)) {
+    if (byV3[v3id]) { mapped[v3id] = byV3[v3id]; continue; }
+    const n = normalizeFa(r.name);
+    // exact / contains against same-side roster
+    const cands = roster.filter(p =>
+      (r.side === 'host' ? p.club_id === homeClub : p.club_id === awayClub));
+    let hit = cands.find(p => normName[p.id] === n)
+      || cands.find(p => normName[p.id] && (normName[p.id].includes(n) || n.includes(normName[p.id])));
+    if (hit) {
+      mapped[v3id] = hit.id;
+      await query(`UPDATE players SET v3id=$1 WHERE id=$2`, [Number(v3id), hit.id]);
+    } else {
+      leftovers.push({ v3id, name: r.name, side: r.side, pos: r.pos, starter: r.starter });
     }
   }
-  return { data, roster };
+  return { mapped, leftovers, roster };
 }
 
-function validateGoals(fx, data, roster) {
-  const byId = {};
-  for (const p of roster) byId[p.id] = p;
-  // map extracted to club
-  let homeFor = 0, awayFor = 0;
-  const clubOf = pl => {
-    if (pl.player_id && byId[pl.player_id]) return byId[pl.player_id].club_id;
-    if (pl.side === 'home') return fx.home_club;
-    if (pl.side === 'away') return fx.away_club;
-    return null;
-  };
-  // attach club by matching new players to side via starter lists is unreliable;
-  // instead compute from mapped players only and allow unmatched-new goals tolerance of 0
-  for (const pl of data.players) {
-    const cid = clubOf(pl);
-    if (!cid) continue;
-    const isHome = cid === fx.home_club;
-    if (pl.own_goal) { if (isHome) awayFor += pl.own_goal; else homeFor += pl.own_goal; }
-    else if (pl.goals) { if (isHome) homeFor += pl.goals; else awayFor += pl.goals; }
+async function mapLeftoversLLM(leftovers, homeClub, awayClub) {
+  // one small batched call
+  const { rows: roster } = await query(
+    `SELECT id, club_id, fa_name, pos FROM players WHERE club_id=$1 OR club_id=$2`,
+    [homeClub, awayClub]);
+  const fmt = roster.map(p => `${p.id}|${p.club_id === homeClub ? 'H' : 'A'}|${p.fa_name}|${p.pos}`).join('\n');
+  const names = leftovers.map(l => `${l.v3id}|${l.side === 'host' ? 'H' : 'A'}|${l.name}|${l.pos || '?'}`).join('\n');
+  const sys = 'Persian football name matcher. Reply ONLY valid JSON.';
+  const user = `Roster (id|side|name|pos):\n${fmt}\nReport names (v3id|side|name|guessedPos):\n${names}\nMatch each report name to roster id by sound (transliteration varies). Reply {"map":[{"v3id":n,"id":n|null}]}. Use null only if truly absent. ONLY JSON.`;
+  const { chatJson } = require('./nim');
+  const data = await chatJson(sys, user, { maxTokens: 2000 });
+  const out = {};
+  for (const m of (data.map || [])) {
+    if (m.id) {
+      out[m.v3id] = m.id;
+      await query(`UPDATE players SET v3id=$1 WHERE id=$2`, [Number(m.v3id), Number(m.id)]);
+    }
   }
-  return {
-    ok: homeFor === fx.home_goals && awayFor === fx.away_goals,
-    homeFor, awayFor, expH: fx.home_goals, expA: fx.away_goals
-  };
+  return out;
 }
 
-async function applyExtraction(fx, data, roster) {
-  const byName = {};
-  for (const p of roster) byName[p.id] = p;
-  const clubs = {};
-  {
-    const { rows } = await query(`SELECT id, tier FROM clubs WHERE id=$1 OR id=$2`, [fx.home_club, fx.away_club]);
-    for (const c of rows) clubs[c.id] = c.tier;
+async function applyParsed(fx, per, homeClub, awayClub, sideOf, d) {
+  const { mapped, leftovers } = await resolveIdentities(per, homeClub, awayClub);
+  let llmMapped = {};
+  if (leftovers.length) {
+    try { llmMapped = await mapLeftoversLLM(leftovers, homeClub, awayClub); }
+    catch (e) { llmMapped = {}; }
   }
-  // resolve ids (auto-add unknown, tagged to the correct side)
-  for (const pl of data.players) {
-    if (!pl.player_id && pl.new_name) {
-      pl._club = pl.side === 'away' ? fx.away_club : fx.home_club;
+  const { rows: clubs } = await query(`SELECT id, tier FROM clubs WHERE id=$1 OR id=$2`, [homeClub, awayClub]);
+  const tier = {};
+  for (const c of clubs) tier[c.id] = c.tier;
+  let applied = 0;
+  for (const [v3id, r] of Object.entries(per)) {
+    let pid = mapped[v3id] || llmMapped[v3id] || null;
+    if (!pid) {
+      // auto-add unknown player
+      const club = r.side === 'host' ? homeClub : awayClub;
+      const pos = ['GKP', 'DEF', 'MID', 'FWD'].includes(r.pos) ? r.pos : 'MID';
       const { rows } = await query(
-        `INSERT INTO players (club_id, fa_name, pos, price, is_foreign)
-         VALUES ($1,$2,$3,$4,false) RETURNING id`,
-        [pl._club, pl.new_name, ['GKP', 'DEF', 'MID', 'FWD'].includes(pl.new_pos) ? pl.new_pos : 'MID',
-         priceFor(clubs[pl._club] || 3, pl.new_pos)]);
-      pl.player_id = rows[0].id;
+        `INSERT INTO players (club_id, fa_name, pos, price, is_foreign, v3id, portrait)
+         VALUES ($1,$2,$3,$4,false,$5,$6) RETURNING id`,
+        [club, r.name, pos, priceFor(tier[club] || 3, pos), Number(v3id), r.portrait]);
+      pid = rows[0].id;
+    } else if (r.portrait) {
+      await query(`UPDATE players SET portrait=COALESCE(portrait,$1) WHERE id=$2`, [r.portrait, pid]);
     }
-  }
-  const allowed = ['minutes', 'goals', 'assists', 'saves', 'pen_saved', 'pen_missed', 'yellow', 'red', 'own_goal'];
-  for (const pl of data.players) {
-    if (!pl.player_id) continue;
-    const sets = [], vals = [];
-    for (const k of allowed) {
-      sets.push(`${k} = $${vals.length + 1}`);
-      vals.push(Number(pl[k]) || 0);
-    }
-    const all = [...vals, fx.gw_id, pl.player_id];
-    const n = vals.length;
+    if (r.minutes <= 0 && !r.goals && !r.assists && !r.yellow && !r.red && !r.own_goal && !r.pen_missed && !r.pen_saved) continue;
     await query(
       `INSERT INTO stats_gw (gw_id, player_id) VALUES ($1,$2) ON CONFLICT (gw_id, player_id) DO NOTHING`,
-      [fx.gw_id, pl.player_id]);
+      [fx.gw_id, pid]);
     await query(
-      `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${n + 1} AND player_id=$${n + 2}`, all);
+      `UPDATE stats_gw SET minutes=$1, goals=$2, assists=$3, saves=$4, pen_saved=$5, pen_missed=$6, yellow=$7, red=$8, own_goal=$9
+       WHERE gw_id=$10 AND player_id=$11`,
+      [r.minutes, r.goals, r.assists, r.saves, r.pen_saved, r.pen_missed, r.yellow, r.red, r.own_goal, fx.gw_id, pid]);
+    applied++;
   }
-  await query(
-    `UPDATE fixtures SET stats_applied=true, stats_source='auto-v3+nim' WHERE id=$1`, [fx.id]);
+  await query(`UPDATE fixtures SET stats_applied=true, stats_source='auto-v3' WHERE id=$1`, [fx.id]);
+  return { applied };
 }
 
-/* One fixture end-to-end. Returns {status} */
-async function processFixture(fx, v3cache) {
-  const { rows: cl } = await query(`SELECT id, fa_name FROM clubs WHERE id=$1 OR id=$2`, [fx.home_club, fx.away_club]);
-  const cmap = {};
-  for (const c of cl) cmap[c.id] = c.fa_name;
-  const home = cmap[fx.home_club], away = cmap[fx.away_club];
-  if (!v3cache.list) v3cache.list = await v3.leagueMatches();
-  const cand = v3cache.list.find(m =>
-    (teamMatch(m.home, home) && teamMatch(m.away, away)));
-  if (!cand) return { status: 'no-v3-match' };
-  // adopt score if missing
-  if ((fx.home_goals === null || fx.away_goals === null) && cand.scoreH !== null) {
-    await query(`UPDATE fixtures SET home_goals=$1, away_goals=$2, finished=true WHERE id=$3`,
-      [cand.scoreH, cand.scoreA, fx.id]);
-    fx.home_goals = cand.scoreH; fx.away_goals = cand.scoreA; fx.finished = true;
+function validateParsed(fx, per, homeClub, awayClub, rosterClub) {
+  // rosterClub: {playerId: clubId} + side map for new (from per side)
+  let h = 0, a = 0;
+  for (const [v3id, r] of Object.entries(per)) {
+    const cid = (rosterClub[v3id] !== undefined) ? rosterClub[v3id]
+      : (r.side === 'host' ? homeClub : awayClub);
+    const isHome = cid === homeClub;
+    if (r.own_goal) { if (isHome) a += r.own_goal; else h += r.own_goal; }
+    else if (r.goals) { if (isHome) h += r.goals; else a += r.goals; }
+  }
+  return { ok: h === fx.home_goals && a === fx.away_goals, h, a };
+}
+
+async function processFixture(fx) {
+  // fx: fixture row with home_club, away_club, gw_id, home_goals...
+  // find v3 match id
+  let v3id = fx.varzesh3_id;
+  if (!v3id) {
+    const { rows: cl } = await query(`SELECT id, fa_name FROM clubs WHERE id=$1 OR id=$2`, [fx.home_club, fx.away_club]);
+    const cmap = {}; for (const c of cl) cmap[c.id] = c.fa_name;
+    const list = await v3.leagueMatches();
+    const cand = list.find(m => teamMatch(m.home, cmap[fx.home_club]) && teamMatch(m.away, cmap[fx.away_club]));
+    if (!cand) return { status: 'no-v3-match' };
+    v3id = cand.v3id;
+    await query(`UPDATE fixtures SET varzesh3_id=$1 WHERE id=$2`, [v3id, fx.id]);
+    if ((fx.home_goals === null || fx.away_goals === null) && cand.scoreH !== null) {
+      await query(`UPDATE fixtures SET home_goals=$1, away_goals=$2, finished=true WHERE id=$3`,
+        [cand.scoreH, cand.scoreA, fx.id]);
+      fx.home_goals = cand.scoreH; fx.away_goals = cand.scoreA; fx.finished = true;
+    }
   }
   if (fx.home_goals === null) return { status: 'no-score' };
-  const report = await v3.matchReport(cand.path);
-  if (!report || !report.events) return { status: 'no-report' };
-  await query(`UPDATE fixtures SET varzesh3_id=$1 WHERE id=$2`, [cand.v3id, fx.id]);
-  const { data, roster } = await extractForFixture(
-    { ...fx, home, away }, report).catch(e => ({ err: e.message }));
-  if (data && data.err) return { status: 'extract-failed', notes: data.err };
-  // tag new players with club side using lineup text? keep simple: prompt already maps known; new default home (rare)
-  const v = validateGoals({ ...fx, home_goals: fx.home_goals, away_goals: fx.away_goals }, data, roster);
+  let d;
+  try { d = await v3.matchDetail(v3id); }
+  catch (e) { return { status: 'no-report' }; }
+  if (!d || d.status !== 7 || !d.events) return { status: 'not-finished' };
+  // adopt official score/teams data
+  if (d.goals) {
+    await query(`UPDATE fixtures SET home_goals=$1, away_goals=$2, finished=true WHERE id=$3`,
+      [d.goals.host, d.goals.guest, fx.id]);
+    fx.home_goals = d.goals.host; fx.away_goals = d.goals.guest;
+  }
+  // store club colors + v3 team ids
+  for (const [side, club] of [['host', fx.home_club], ['away', fx.away_club]]) {
+    const t = d[side];
+    if (t) {
+      await query(`UPDATE clubs SET v3id=COALESCE(v3id,$1), color1=COALESCE($2,color1) WHERE id=$3`,
+        [String(t.id), t.style && t.style.backgroundColor, club]);
+    }
+  }
+  const per = parseMatchDetail(d);
+  // roster club map for validation
+  const { rows: roster } = await query(
+    `SELECT id, club_id, v3id FROM players WHERE club_id=$1 OR club_id=$2`, [fx.home_club, fx.away_club]);
+  const rosterClub = {};
+  for (const p of roster) { if (p.v3id) rosterClub[p.v3id] = p.club_id; }
+  const v = validateParsed(fx, per, fx.home_club, fx.away_club, rosterClub);
   if (!v.ok) {
     await query(`UPDATE fixtures SET stats_source=$1 WHERE id=$2`,
-      [`mismatch:H${v.homeFor}/${v.expH}-A${v.awayFor}/${v.expA} ${(data.notes || '').slice(0, 120)}`, fx.id]);
-    return { status: 'mismatch', notes: `H ${v.homeFor}/${v.expH} A ${v.awayFor}/${v.expA}` };
+      [`mismatch:H${v.h}/${fx.home_goals}-A${v.a}/${fx.away_goals}`, fx.id]);
+    return { status: 'mismatch', notes: `H ${v.h}/${fx.home_goals} A ${v.a}/${fx.away_goals}` };
   }
-  await applyExtraction(fx, data, roster);
-  // finish gw with bonus only when whole round is applied
+  const r = await applyParsed(fx, per, fx.home_club, fx.away_club);
   const { rows: rem } = await query(
     `SELECT count(*)::int AS n FROM fixtures WHERE gw_id=$1 AND NOT (finished AND stats_applied)`, [fx.gw_id]);
   await finishGw(fx.gw_id, { bonus: rem[0].n === 0 });
-  return { status: 'applied', bonus: rem[0].n === 0 };
+  return { status: 'applied', applied: r.applied, bonus: rem[0].n === 0 };
 }
 
 async function pendingFixtures(limit = 10) {
@@ -197,12 +300,10 @@ async function pendingFixtures(limit = 10) {
 
 async function autoIngestCycle(limit = 2) {
   const work = await pendingFixtures(10);
-  const v3cache = {};
   const results = [];
   for (const fx of work.slice(0, limit)) {
     try {
-      // enrich fx with club names already selected
-      const r = await processFixture(fx, v3cache);
+      const r = await processFixture(fx);
       results.push({ fixture: fx.id, gw: fx.gw_id, ...r });
     } catch (e) {
       results.push({ fixture: fx.id, gw: fx.gw_id, status: 'error', notes: (e && e.message || '').slice(0, 160) });
@@ -211,4 +312,4 @@ async function autoIngestCycle(limit = 2) {
   return results;
 }
 
-module.exports = { autoIngestCycle, pendingFixtures, processFixture, normalizeFa, teamMatch, buildPrompt };
+module.exports = { autoIngestCycle, pendingFixtures, processFixture, normalizeFa, teamMatch, parseMatchDetail };

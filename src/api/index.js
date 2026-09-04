@@ -205,6 +205,13 @@ router.post('/admin/sync-season', async (req, res) => {
   await refreshGwFlags();
   res.json(r);
 });
+router.post('/admin/sync-v3', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { syncV3Results } = require('../services/ingest/v3sync');
+  const r = await syncV3Results();
+  await refreshGwFlags();
+  res.json(r);
+});
 router.post('/admin/finish-gw/:gw', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const r = await finishGw(Number(req.params.gw), { bonus: req.body.bonus !== false });

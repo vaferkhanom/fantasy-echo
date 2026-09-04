@@ -176,6 +176,12 @@ async function ensureSchema() {
   for (const [col, def] of [['varzesh3_id', 'TEXT'], ['stats_applied', 'BOOLEAN DEFAULT false'], ['stats_source', 'TEXT']]) {
     try { await c.query(`ALTER TABLE fixtures ADD COLUMN ${col} ${def}`); } catch (_) {}
   }
+  for (const [tbl, col, def] of [
+    ['players', 'v3id', 'INT'], ['players', 'portrait', 'TEXT'],
+    ['clubs', 'v3id', 'TEXT'], ['clubs', 'color1', 'TEXT'], ['clubs', 'color2', 'TEXT']
+  ]) {
+    try { await c.query(`ALTER TABLE ${tbl} ADD COLUMN ${col} ${def}`); } catch (_) {}
+  }
 }
 
 module.exports = { ensureSchema };

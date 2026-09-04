@@ -14,6 +14,10 @@ const api = require('./api');
 
 async function main() {
   await ensureSchema();
+  try {
+    const { syncClubMeta } = require('./seed');
+    await syncClubMeta();
+  } catch (_) {}
   await refreshGwFlags().catch(() => {});
   await refreshRanks().catch(() => {});
 
@@ -31,7 +35,16 @@ async function main() {
   app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
   // Scheduler: fixtures sync every 6h; auto stats ingest hourly (2 fixtures); score refresh hourly; flags nightly.
-  cron.schedule('7 */6 * * *', () => syncCurrent().catch(() => {}));
+  cron.schedule('7 */6 * * *', () => {
+    (async () => {
+      try {
+        const { syncV3Results } = require('./services/ingest/v3sync');
+        await syncV3Results();
+      } catch (_) {}
+      try { await syncCurrent(); } catch (_) {}
+      try { await refreshGwFlags(); } catch (_) {}
+    })();
+  });
   cron.schedule('23 * * * *', () => {
     try {
       const { autoIngestCycle } = require('./services/ingest/auto');
