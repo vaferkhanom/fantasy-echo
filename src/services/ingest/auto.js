@@ -241,22 +241,37 @@ function validateParsed(fx, per, homeClub, awayClub, rosterClub) {
   return { ok: h === fx.home_goals && a === fx.away_goals, h, a };
 }
 
-async function processFixture(fx) {
+async function findV3Match(fx, cmap, cache) {
+  if (!cache.rounds) cache.rounds = await v3.resultsAll();
+  for (const r of cache.rounds) {
+    const m = String(r.round || '').match(/(\d+)/);
+    if (!m || Number(m[1]) !== fx.gw_id) continue;
+    for (const dg of (r.dates || [])) {
+      for (const mt of (dg.matches || [])) {
+        if (teamMatch(mt.host.name, cmap[fx.home_club]) && teamMatch(mt.guest.name, cmap[fx.away_club])) {
+          return mt;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function processFixture(fx, cache = {}) {
   // fx: fixture row with home_club, away_club, gw_id, home_goals...
   // find v3 match id
   let v3id = fx.varzesh3_id;
+  const { rows: cl } = await query(`SELECT id, fa_name FROM clubs WHERE id=$1 OR id=$2`, [fx.home_club, fx.away_club]);
+  const cmap = {}; for (const c of cl) cmap[c.id] = c.fa_name;
   if (!v3id) {
-    const { rows: cl } = await query(`SELECT id, fa_name FROM clubs WHERE id=$1 OR id=$2`, [fx.home_club, fx.away_club]);
-    const cmap = {}; for (const c of cl) cmap[c.id] = c.fa_name;
-    const list = await v3.leagueMatches();
-    const cand = list.find(m => teamMatch(m.home, cmap[fx.home_club]) && teamMatch(m.away, cmap[fx.away_club]));
-    if (!cand) return { status: 'no-v3-match' };
-    v3id = cand.v3id;
+    const mt = await findV3Match(fx, cmap, cache).catch(() => null);
+    if (!mt) return { status: 'no-v3-match' };
+    v3id = String(mt.id);
     await query(`UPDATE fixtures SET varzesh3_id=$1 WHERE id=$2`, [v3id, fx.id]);
-    if ((fx.home_goals === null || fx.away_goals === null) && cand.scoreH !== null) {
+    if (mt.goals && (fx.home_goals === null || fx.away_goals === null)) {
       await query(`UPDATE fixtures SET home_goals=$1, away_goals=$2, finished=true WHERE id=$3`,
-        [cand.scoreH, cand.scoreA, fx.id]);
-      fx.home_goals = cand.scoreH; fx.away_goals = cand.scoreA; fx.finished = true;
+        [mt.goals.host, mt.goals.guest, fx.id]);
+      fx.home_goals = mt.goals.host; fx.away_goals = mt.goals.guest; fx.finished = true;
     }
   }
   if (fx.home_goals === null) return { status: 'no-score' };
@@ -313,11 +328,12 @@ async function autoIngestCycle(limit = 2) {
   cycleRunning = true;
   try {
     const work = await pendingFixtures(10);
+    const cache = {};
     const results = [];
     for (const fx of work.slice(0, limit)) {
       try {
         await query(`UPDATE fixtures SET locked_at=now() WHERE id=$1`, [fx.id]);
-        const r = await processFixture(fx);
+        const r = await processFixture(fx, cache);
         results.push({ fixture: fx.id, gw: fx.gw_id, ...r });
       } catch (e) {
         results.push({ fixture: fx.id, gw: fx.gw_id, status: 'error', notes: (e && e.message || '').slice(0, 160) });
