@@ -166,16 +166,18 @@ async function mapLeftoversLLM(leftovers, homeClub, awayClub) {
     `SELECT id, club_id, fa_name, pos FROM players WHERE club_id=$1 OR club_id=$2`,
     [homeClub, awayClub]);
   const fmt = roster.map(p => `${p.id}|${p.club_id === homeClub ? 'H' : 'A'}|${p.fa_name}|${p.pos}`).join('\n');
-  const names = leftovers.map(l => `${l.v3id}|${l.side === 'host' ? 'H' : 'A'}|${l.name}|${l.pos || '?'}`).join('\n');
+  const names = leftovers.map(l => `${l.v3id}|${l.side === 'host' ? 'H' : 'A'}|${l.name}|${l.pos || '?'}|${l.starter ? 'starter' : 'bench'}`).join('\n');
   const sys = 'Persian football name matcher. Reply ONLY valid JSON.';
-  const user = `Roster (id|side|name|pos):\n${fmt}\nReport names (v3id|side|name|guessedPos):\n${names}\nMatch each report name to roster id by sound (transliteration varies). Reply {"map":[{"v3id":n,"id":n|null}]}. Use null only if truly absent. ONLY JSON.`;
+  const user = `Roster (id|side|name|pos):\n${fmt}\nReport names (v3id|side|name|guessedPos|starterOrBench):\n${names}\nMatch each report name to roster id by sound (transliteration varies). Reply {"map":[{"v3id":n,"id":n|null,"pos":"GKP"|"DEF"|"MID"|"FWD"}]}. Use null only if truly absent; pos = best position (use your football knowledge; starters: first lineup player is GK). ONLY JSON.`;
   const { chatJson } = require('./nim');
   const data = await chatJson(sys, user, { maxTokens: 2000 });
   const out = {};
   for (const m of (data.map || [])) {
     if (m.id) {
-      out[m.v3id] = m.id;
+      out[m.v3id] = { id: m.id };
       await query(`UPDATE players SET v3id=$1 WHERE id=$2`, [Number(m.v3id), Number(m.id)]);
+    } else {
+      out[m.v3id] = { id: null, pos: m.pos };
     }
   }
   return out;
@@ -193,11 +195,17 @@ async function applyParsed(fx, per, homeClub, awayClub, sideOf, d) {
   for (const c of clubs) tier[c.id] = c.tier;
   let applied = 0;
   for (const [v3id, r] of Object.entries(per)) {
-    let pid = mapped[v3id] || llmMapped[v3id] || null;
+    let pid = mapped[v3id] || null;
+    let llmPos = null;
+    const lm = llmMapped[v3id];
+    if (lm) {
+      if (lm.id) pid = lm.id;
+      else if (['GKP', 'DEF', 'MID', 'FWD'].includes(lm.pos)) llmPos = lm.pos;
+    }
     if (!pid) {
       // auto-add unknown player
       const club = r.side === 'host' ? homeClub : awayClub;
-      const pos = ['GKP', 'DEF', 'MID', 'FWD'].includes(r.pos) ? r.pos : 'MID';
+      const pos = llmPos || (['GKP', 'DEF', 'MID', 'FWD'].includes(r.pos) ? r.pos : 'MID');
       const { rows } = await query(
         `INSERT INTO players (club_id, fa_name, pos, price, is_foreign, v3id, portrait)
          VALUES ($1,$2,$3,$4,false,$5,$6) RETURNING id`,
