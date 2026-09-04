@@ -9,7 +9,7 @@ const { playChip, activeChips, chipUsed } = require('../services/chips');
 const { createLeague, joinByCode, leagueTable, myLeagues } = require('../services/leagues');
 const { computeEntryGw, refreshRanks } = require('../services/entries');
 const { finishGw, upsertSignal } = require('../services/engine');
-const { syncSeason, syncCurrent } = require('../services/ingest/tsdb');
+const { syncSeason, syncCurrent, syncRounds } = require('../services/ingest/tsdb');
 const { toUnits, fromUnits, getEntry } = require('../services/transfers');
 
 const router = express.Router();
@@ -173,6 +173,23 @@ router.get('/my-points', async (req, res) => {
 });
 
 // Admin
+router.post('/admin/seed-data', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { seedClubsAndPlayers } = require('../seed');
+  const seeded = await seedClubsAndPlayers();
+  await refreshGwFlags();
+  res.json({ seeded });
+});
+router.post('/admin/sync-rounds', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const from = Math.max(1, Number(req.body.from) || 1);
+  const to = Math.min(34, Number(req.body.to) || from);
+  const rounds = [];
+  for (let r = from; r <= to; r++) rounds.push(r);
+  const r = await syncRounds(rounds);
+  await refreshGwFlags();
+  res.json({ ...r, from, to });
+});
 router.post('/admin/bootstrap', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const { seedClubsAndPlayers } = require('../seed');
