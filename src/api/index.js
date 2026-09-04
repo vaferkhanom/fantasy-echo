@@ -173,6 +173,26 @@ router.get('/my-points', async (req, res) => {
 });
 
 // Admin
+router.post('/admin/diag2', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const out = {};
+  try {
+    const { rows: cons } = await query(
+      `SELECT conname, contype FROM pg_constraint WHERE conrelid='stats_gw'::regclass`);
+    out.constraints = cons;
+    const { rows: cols } = await query(
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name='stats_gw' ORDER BY ordinal_position`);
+    out.columns = cols.map(c => c.column_name + ':' + c.data_type);
+    await query(`INSERT INTO stats_gw (gw_id, player_id, minutes) VALUES (99, 9999, 0) ON CONFLICT (gw_id, player_id) DO NOTHING`);
+    out.plainInsert = 'ok';
+    await query(`DELETE FROM stats_gw WHERE gw_id=99 AND player_id=9999`);
+    out.cleanup = 'ok';
+    res.json(out);
+  } catch (e) {
+    out.error = e.message;
+    res.status(500).json(out);
+  }
+});
 router.post('/admin/diag', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
   const t = {};
