@@ -301,7 +301,8 @@ async function pendingFixtures(limit = 10) {
   const { rows } = await query(
     `SELECT f.*, c1.fa_name AS home, c2.fa_name AS away
      FROM fixtures f JOIN clubs c1 ON c1.id=f.home_club JOIN clubs c2 ON c2.id=f.away_club
-     WHERE NOT f.stats_applied AND (f.finished OR (f.kickoff IS NOT NULL AND f.kickoff < now() - interval '2 hours'))
+     WHERE NOT f.stats_applied AND (f.locked_at IS NULL OR f.locked_at < now() - interval '30 minutes')
+       AND (f.finished OR (f.kickoff IS NOT NULL AND f.kickoff < now() - interval '2 hours'))
      ORDER BY f.kickoff NULLS LAST, f.id LIMIT $1`, [limit]);
   return rows;
 }
@@ -311,6 +312,7 @@ async function autoIngestCycle(limit = 2) {
   const results = [];
   for (const fx of work.slice(0, limit)) {
     try {
+      await query(`UPDATE fixtures SET locked_at=now() WHERE id=$1`, [fx.id]);
       const r = await processFixture(fx);
       results.push({ fixture: fx.id, gw: fx.gw_id, ...r });
     } catch (e) {
