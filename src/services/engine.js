@@ -33,24 +33,34 @@ async function finishGw(gwId) {
     };
   }
   const scored = scoreFixture(statsByPlayer, conceded, playersById);
+  console.log('[finish] players scored:', Object.keys(scored).length);
 
-  const c = await tx(async client => {
+  await tx(async client => {
     await client.query(`DELETE FROM points WHERE gw_id=$1`, [gwId]);
-    for (const [pid, r] of Object.entries(scored)) {
+    const entries = Object.entries(scored);
+    for (let i = 0; i < entries.length; i += 100) {
+      const chunk = entries.slice(i, i + 100);
+      const vals = [];
+      const rows = chunk.map(([pid, r], j) => {
+        vals.push(gwId, Number(pid), r.pts, r.bps, r.minutes);
+        const o = j * 5;
+        return `(0,$${o + 1},$${o + 2},$${o + 3},$${o + 4},$${o + 5})`;
+      });
       await client.query(
-        `INSERT INTO points (entry_id, gw_id, player_id, pts, bps, minutes)
-         VALUES (0,$1,$2,$3,$4,$5)`,
-        [gwId, Number(pid), r.pts, r.bps, r.minutes]);
+        `INSERT INTO points (entry_id, gw_id, player_id, pts, bps, minutes) VALUES ${rows.join(',')}`,
+        vals);
     }
-    return Object.keys(scored).length;
   });
+  console.log('[finish] points frozen');
 
   await recomputeAllForGw(gwId);
+  console.log('[finish] entries recomputed');
   await updatePrices(gwId);
+  console.log('[finish] prices updated');
   await logPrices(gwId);
   await refreshRanks();
   await refreshGwFlags();
-  return { playersScored: c, gwId };
+  return { playersScored: Object.keys(scored).length, gwId };
 }
 
 async function upsertSignal(gwId, playerId, signalObj, adminId) {

@@ -30,20 +30,23 @@ async function updatePrices(gwId) {
   const prevOwn = meta[0] ? JSON.parse(meta[0].value) : {};
 
   const { rows: players } = await query(`SELECT id, price FROM players`);
-  let changes = [];
+  const changes = [];
+  const ups = [], downs = [];
   for (const p of players) {
-    const cur = toUnits(p.price);
+    const cur = toUnits(Number(p.price));
     const nNow = now[p.id] || 0;
     const nPrev = prevOwn[p.id] || 0;
     const delta = nNow - nPrev;
-    let nu = cur;
-    if (delta >= C.priceRiseThreshold) nu = Math.min(cur + C.priceDelta, 1400);
-    else if (delta <= -C.priceFallThreshold) nu = Math.max(cur - C.priceDelta, 40);
-    if (nu !== cur) {
-      await query(`UPDATE players SET price=$1 WHERE id=$2`, [fromUnits(nu), p.id]);
-      changes.push({ id: p.id, from: fromUnits(cur), to: fromUnits(nu) });
+    if (delta >= C.priceRiseThreshold) {
+      const nu = Math.min(cur + C.priceDelta, 1400);
+      if (nu !== cur) { ups.push(p.id); changes.push({ id: p.id, from: fromUnits(cur), to: fromUnits(nu) }); }
+    } else if (delta <= -C.priceFallThreshold) {
+      const nu = Math.max(cur - C.priceDelta, 40);
+      if (nu !== cur) { downs.push(p.id); changes.push({ id: p.id, from: fromUnits(cur), to: fromUnits(nu) }); }
     }
   }
+  if (ups.length) await query(`UPDATE players SET price = price + 0.1 WHERE id = ANY($1)`, [ups]);
+  if (downs.length) await query(`UPDATE players SET price = price - 0.1 WHERE id = ANY($1) AND price > 4.0`, [downs]);
   await query(`
     INSERT INTO meta (key, value) VALUES ('ownership', $1)
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
@@ -52,13 +55,11 @@ async function updatePrices(gwId) {
 }
 
 async function logPrices(gwId) {
-  const { rows } = await query(`SELECT id, price FROM players`);
-  for (const r of rows) {
-    await query(`
-      INSERT INTO price_hist (player_id, gw_id, price) VALUES ($1,$2,$3)
-      ON CONFLICT (player_id, gw_id) DO UPDATE SET price=EXCLUDED.price`,
-      [r.id, gwId, r.price]);
-  }
+  await query(`
+    INSERT INTO price_hist (player_id, gw_id, price)
+    SELECT id, $1, price FROM players
+    ON CONFLICT (player_id, gw_id) DO UPDATE SET price=EXCLUDED.price`,
+    [gwId]);
 }
 
 module.exports = { updatePrices, logPrices };
