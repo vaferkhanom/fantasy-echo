@@ -169,6 +169,10 @@ async function ensureSchema() {
   try {
     await c.query(`ALTER TABLE players ALTER COLUMN price TYPE NUMERIC(4,1)`);
   } catch (_) { /* already numeric */ }
+  // points.entry_id=0 template rows must not be FK-constrained
+  for (const fk of ['points_entry_id_fkey', 'points_gw_id_fkey', 'points_player_id_fkey']) {
+    try { await c.query(`ALTER TABLE points DROP CONSTRAINT ${fk}`); } catch (_) {}
+  }
 }
 
 module.exports = { ensureSchema };
