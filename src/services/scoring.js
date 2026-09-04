@@ -84,30 +84,15 @@ function scoreFixture(statsByPlayer, concededByClub, playersById) {
     const pts = basePoints(st, pl.pos, conceded);
     rows.push({ playerId: Number(pid), pts, bps, minutes: st.minutes || 0 });
   }
-  // Bonus: top 3 BPS -> 3/2/1, ties share
+  // Bonus: distinct BPS ranks get 3/2/1 (ties share the higher value, FPL-style)
   rows.sort((a, b) => b.bps - a.bps);
   const bonuses = {};
-  let rank = 0, prevBps = null, prevBonus = 0;
+  let distinctRank = 0, prevBps = null;
   for (const r of rows) {
     if (r.bps <= 0) break;
-    if (r.bps !== prevBps) { rank = rank === 0 ? 1 : rank; prevBps = r.bps; }
-    // count tie group
-    if (prevBps !== null && r.bps === prevBps && prevBonus) { r.bonus = prevBonus; }
-    else {
-      if (rank > 3) break;
-      const ties = rows.filter(x => x.bps === r.bps).length;
-      const base = rank === 1 ? 3 : rank === 2 ? 2 : 1;
-      r.bonus = ties > 1 ? (rank + ties - 1 >= 4 ? Math.max(0, 4 - rank) : base) : base;
-      // FPL behaviour: ties share the average — simplify: ties get the lowest of the span
-      if (ties > 1) {
-        const span = [];
-        for (let i = rank; i < rank + ties && i <= 3; i++) span.push(4 - i);
-        r.bonus = span.length ? Math.round(span.reduce((a, b) => a + b, 0) / span.length) : 0;
-      }
-      prevBonus = r.bonus;
-      rank += 1;
-    }
-    bonuses[r.playerId] = r.bonus;
+    if (r.bps !== prevBps) { distinctRank++; prevBps = r.bps; }
+    if (distinctRank > 3) break;
+    bonuses[r.playerId] = 4 - distinctRank;
   }
   for (const r of rows) {
     r.pts += bonuses[r.playerId] || 0;

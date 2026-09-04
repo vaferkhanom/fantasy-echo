@@ -71,7 +71,7 @@ function authMiddleware(req, res, next) {
       req.user = user; req.entry = entry; req.isAdmin = isAdmin;
       next();
     })
-    .catch(e => res.status(500).json({ error: 'auth failed', detail: (e && e.message) || String(e) }));
+    .catch(() => res.status(500).json({ error: 'auth failed' }));
 }
 
 module.exports = { validateInitData, sign, verify, authMiddleware, ensureUserAndEntry };
