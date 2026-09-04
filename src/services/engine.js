@@ -54,28 +54,31 @@ async function finishGw(gwId) {
 }
 
 async function upsertSignal(gwId, playerId, signalObj, adminId) {
+  const allowed = ['minutes','goals','assists','saves','pen_saved','pen_missed','yellow','red','own_goal'];
+  const sets = [], vals = [];
+  for (const k of allowed) {
+    if (signalObj[k] !== undefined) {
+      sets.push(`${k} = $${vals.length + 1}`);
+      vals.push(Number(signalObj[k]) || 0);
+    }
+  }
+  if (!sets.length) throw new Error('empty signal');
+  const n = vals.length;
+  const all = [...vals, gwId, playerId];
   await tx(async client => {
+    console.log('[signal] insert admin_signals', gwId, playerId);
     await client.query(
       `INSERT INTO admin_signals (gw_id, player_id, signal, created_by) VALUES ($1,$2,$3,$4)`,
       [gwId, playerId, JSON.stringify(signalObj), adminId]);
-    const allowed = ['minutes','goals','assists','saves','pen_saved','pen_missed','yellow','red','own_goal'];
-    const sets = [], vals = [];
-    let i = 1;
-    for (const k of allowed) {
-      if (signalObj[k] !== undefined) {
-        sets.push(`${k} = $${i++}`);
-        vals.push(Number(signalObj[k]) || 0);
-      }
-    }
-    if (!sets.length) throw new Error('empty signal');
-    vals.push(gwId, playerId);
+    console.log('[signal] upsert stats_gw');
     await client.query(
-      `INSERT INTO stats_gw (gw_id, player_id) VALUES ($${i++}, $${i++})
+      `INSERT INTO stats_gw (gw_id, player_id) VALUES ($${n + 1}, $${n + 2})
        ON CONFLICT (gw_id, player_id) DO NOTHING`,
-      vals);
-    // then update fields
+      all);
+    console.log('[signal] update stats_gw');
     await client.query(
-      `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${i++} AND player_id=$${i++}`, vals);
+      `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${n + 1} AND player_id=$${n + 2}`, all);
+    console.log('[signal] done');
   });
 }
 
