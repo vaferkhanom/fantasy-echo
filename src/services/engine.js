@@ -65,21 +65,19 @@ async function upsertSignal(gwId, playerId, signalObj, adminId) {
   if (!sets.length) throw new Error('empty signal');
   const n = vals.length;
   const all = [...vals, gwId, playerId];
-  await tx(async client => {
-    console.log('[signal] insert admin_signals', gwId, playerId);
-    await client.query(
-      `INSERT INTO admin_signals (gw_id, player_id, signal, created_by) VALUES ($1,$2,$3,$4)`,
-      [gwId, playerId, JSON.stringify(signalObj), adminId]);
-    console.log('[signal] upsert stats_gw');
-    await client.query(
-      `INSERT INTO stats_gw (gw_id, player_id) VALUES ($${n + 1}, $${n + 2})
-       ON CONFLICT (gw_id, player_id) DO NOTHING`,
-      all);
-    console.log('[signal] update stats_gw');
-    await client.query(
-      `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${n + 1} AND player_id=$${n + 2}`, all);
-    console.log('[signal] done');
-  });
+  console.log('[signal] insert admin_signals', gwId, playerId);
+  await query(
+    `INSERT INTO admin_signals (gw_id, player_id, signal, created_by) VALUES ($1,$2,$3,$4)`,
+    [gwId, playerId, JSON.stringify(signalObj), adminId]);
+  console.log('[signal] upsert stats_gw');
+  await query(
+    `INSERT INTO stats_gw (gw_id, player_id) VALUES ($${n + 1}, $${n + 2})
+     ON CONFLICT (gw_id, player_id) DO NOTHING`,
+    all);
+  console.log('[signal] update stats_gw');
+  await query(
+    `UPDATE stats_gw SET ${sets.join(', ')} WHERE gw_id=$${n + 1} AND player_id=$${n + 2}`, all);
+  console.log('[signal] done');
 }
 
 module.exports = { finishGw, upsertSignal };
