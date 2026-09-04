@@ -207,8 +207,19 @@ router.post('/admin/sync-season', async (req, res) => {
 });
 router.post('/admin/finish-gw/:gw', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
-  const r = await finishGw(Number(req.params.gw));
+  const r = await finishGw(Number(req.params.gw), { bonus: req.body.bonus !== false });
   res.json(r);
+});
+router.post('/admin/auto-ingest', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { autoIngestCycle } = require('../services/ingest/auto');
+  const r = await autoIngestCycle(Math.min(9, Math.max(1, Number(req.body.limit) || 2)));
+  res.json(r);
+});
+router.get('/admin/pending', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { pendingFixtures } = require('../services/ingest/auto');
+  res.json(await pendingFixtures(20));
 });
 router.post('/admin/signal', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });

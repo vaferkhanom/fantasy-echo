@@ -30,8 +30,14 @@ async function main() {
   app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
   app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-  // Scheduler: fixtures sync every 6h; score refresh hourly; flags nightly.
+  // Scheduler: fixtures sync every 6h; auto stats ingest hourly (2 fixtures); score refresh hourly; flags nightly.
   cron.schedule('7 */6 * * *', () => syncCurrent().catch(() => {}));
+  cron.schedule('23 * * * *', () => {
+    try {
+      const { autoIngestCycle } = require('./services/ingest/auto');
+      autoIngestCycle(2).catch(() => {});
+    } catch (e) { /* silent */ }
+  });
   cron.schedule('11 * * * *', async () => {
     try {
       const gw = await currentGw();

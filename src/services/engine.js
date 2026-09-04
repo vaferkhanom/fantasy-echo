@@ -15,7 +15,8 @@ const { refreshGwFlags } = require('./gameweek');
  * 5. Recompute every entry's GW total (autosub + chips + captain).
  * 6. Refresh overall ranks, update price engine, log price history.
  */
-async function finishGw(gwId) {
+async function finishGw(gwId, opts = {}) {
+  const withBonus = opts.bonus !== false;
   const T = (s) => console.log(`[finish:${gwId}] ${s} +${Date.now() - t0}ms`);
   const t0 = Date.now();
   await query(`UPDATE gameweeks SET is_finished=true WHERE id=$1`, [gwId]);
@@ -36,6 +37,9 @@ async function finishGw(gwId) {
     };
   }
   const scored = scoreFixture(statsByPlayer, conceded, playersById);
+  if (!withBonus) {
+    for (const r of Object.values(scored)) { r.pts -= r.bonus; r.bonus = 0; }
+  }
   console.log('[finish] players scored:', Object.keys(scored).length);
 
   await query(`DELETE FROM points WHERE gw_id=$1`, [gwId]);

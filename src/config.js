@@ -7,6 +7,8 @@ module.exports = {
   appUrl: (process.env.APP_URL || '').replace(/\/+$/, ''),
   adminIds: (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
   apiFootballKey: process.env.API_FOOTBALL_KEY || '',
+  nvapiKey: process.env.NVAPI_KEY || '',
+  nimModel: process.env.NIM_MODEL || 'openai/gpt-oss-20b',
   sessionSecret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   tsdbKey: process.env.TSDB_KEY || '3',
   tz: 'Asia/Tehran',

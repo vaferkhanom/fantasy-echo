@@ -173,6 +173,9 @@ async function ensureSchema() {
   for (const fk of ['points_entry_id_fkey', 'points_gw_id_fkey', 'points_player_id_fkey']) {
     try { await c.query(`ALTER TABLE points DROP CONSTRAINT ${fk}`); } catch (_) {}
   }
+  for (const [col, def] of [['varzesh3_id', 'TEXT'], ['stats_applied', 'BOOLEAN DEFAULT false'], ['stats_source', 'TEXT']]) {
+    try { await c.query(`ALTER TABLE fixtures ADD COLUMN ${col} ${def}`); } catch (_) {}
+  }
 }
 
 module.exports = { ensureSchema };
