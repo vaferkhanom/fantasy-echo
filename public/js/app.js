@@ -3,7 +3,7 @@ const tg = window.Telegram?.WebApp;
 const state = { me: null, players: [], clubs: [], draft: null, gw: null, clubsById: {} };
 const FA_NUM = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
 const faNum = n => String(n).replace(/\d/g, d => FA_NUM[d]);
-const money = p => faNum(p.toFixed(1));
+const money = p => faNum(Number(p).toFixed(1));
 const posFa = { GKP: 'دروازه‌بان', DEF: 'دفاع', MID: 'هافبک', FWD: 'مهاجم' };
 const posTag = { GKP: 'gkp', DEF: 'def', MID: 'mid', FWD: 'fwd' };
 const POS_COLORS = { GKP: ['#7dd3fc', '#38bdf8'], DEF: ['#86efac', '#22c55e'], MID: ['#fde047', '#eab308'], FWD: ['#fca5a5', '#ef4444'] };
@@ -95,10 +95,18 @@ function toast(msg, type = '') {
 }
 function sheet(html) {
   const m = document.getElementById('modal');
-  document.getElementById('sheet').innerHTML = `<div class="grab"></div>` + html;
+  document.getElementById('sheet').innerHTML =
+    `<div class="grab-row"><div class="grab"></div><button class="sheet-x" id="sheet-x" aria-label="بستن">✕</button></div>` + html;
   m.classList.remove('hidden');
+  document.getElementById('sheet-x').onclick = () => { haptic(); closeSheet(); };
 }
 function closeSheet() { document.getElementById('modal').classList.add('hidden'); }
+function backHtml(tab, label = 'بازگشت') {
+  return `<button class="back-btn" data-back="${tab}"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>${label}</button>`;
+}
+function wireBack(root) {
+  root.querySelectorAll('[data-back]').forEach(b => b.onclick = () => { haptic(); go(b.dataset.back); });
+}
 document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeSheet(); });
 function confetti(n = 40) {
   const colors = ['#f0b90b', '#ffdd57', '#22c55e', '#38bdf8', '#ef4444', '#ffffff'];
@@ -267,7 +275,7 @@ async function renderMarket() {
     </div>
     <div id="plist" class="stagger"></div>`;
   if (!state.players.length) {
-    state.players = await api('/players');
+    state.players = (await api('/players')).map(p => ({ ...p, price: Number(p.price) }));
     const clubs = await api('/clubs');
     state.clubsById = Object.fromEntries(clubs.map(c => [c.id, c]));
   }
@@ -329,7 +337,7 @@ async function renderSquad() {
   const me = await api('/me').catch(() => null);
   if (me) state.me = me;
   if (!state.players.length) {
-    state.players = await api('/players');
+    state.players = (await api('/players')).map(p => ({ ...p, price: Number(p.price) }));
     const clubs = await api('/clubs');
     state.clubsById = Object.fromEntries(clubs.map(c => [c.id, c]));
   }
@@ -361,7 +369,7 @@ function initDraft(existing) {
 
 function draftTotals() {
   const filled = state.draft.slots.filter(s => s.player);
-  const spent = filled.reduce((s, x) => s + x.player.price, 0);
+  const spent = filled.reduce((s, x) => s + Number(x.player.price), 0);
   const counts = { GKP: 0, DEF: 0, MID: 0, FWD: 0 };
   filled.forEach(s => counts[s.player.pos]++);
   const clubCounts = {};
@@ -375,7 +383,7 @@ function addToDraft(player) {
   if (d.slots.some(s => s.player?.id === player.id)) return toast('این بازیکن در تیم تو هست', 'err');
   if ((t.clubCounts[player.club_id] || 0) >= 3) return toast('حداکثر ۳ بازیکن از هر باشگاه', 'err');
   if (t.counts[player.pos] >= { GKP: 2, DEF: 5, MID: 5, FWD: 3 }[player.pos]) return toast('ظرفیت پست پر است', 'err');
-  if (player.price > t.bank) return toast('بودجه کافی نیست!', 'err');
+  if (Number(player.price) > t.bank + 1e-9) return toast('بودجه کافی نیست!', 'err');
   const target = d.slots.find(s => !s.player);
   if (!target) return toast('تیم پر است', 'err');
   target.player = player;
@@ -545,7 +553,7 @@ function chipSheet() {
 async function renderMyPoints(gwId) {
   const v = document.getElementById('view');
   const d = await api('/my-points' + (gwId ? '/' + gwId : ''));
-  v.innerHTML = `
+  v.innerHTML = backHtml('home') + `
     <div class="card glow" style="text-align:center">
       <div class="eyebrow" style="justify-content:center">هفته ${faNum(d.gwId)}</div>
       <div class="num gold-t pop" style="font-size:52px;font-weight:700;line-height:1" id="gw-total">0</div>
@@ -557,6 +565,7 @@ async function renderMyPoints(gwId) {
       <div class="muted small">${p.club} · ${posFa[p.pos]} · ${faNum(p.minutes || 0)} دقیقه${p.goals ? ` · ⚽ ${faNum(p.goals)}` : ''}${p.assists ? ` · 🅰️ ${faNum(p.assists)}` : ''}${p.bonus ? ` · ⭐ ${faNum(p.bonus)}` : ''}</div></div></div>`).join('')}
     </div>`;
   countUp(v.querySelector('#gw-total'), d.total);
+  wireBack(v);
 }
 
 /* ============ FIXTURES ============ */
@@ -565,7 +574,7 @@ async function renderFixtures(gwId) {
   const d = await api('/fixtures' + (gwId ? '/' + gwId : ''));
   const gws = Array.from({ length: 7 }, (_, i) => d.gwId - 3 + i).filter(g => g >= 1 && g <= 34);
   const live = d.fixtures.filter(f => !f.finished).length;
-  v.innerHTML = `
+  v.innerHTML = backHtml('home') + `
     <div class="row between" style="margin-bottom:4px">
       <div><div class="eyebrow">تقویم لیگ برتر</div>
       <div style="font-size:19px;font-weight:800">📅 بازی‌های هفته ${faNum(d.gwId)}</div></div>
@@ -580,6 +589,7 @@ async function renderFixtures(gwId) {
         <div class="t b">${f.away}</div>
       </div>`).join('') || '<div class="empty"><div class="big">📅</div><p>بازی‌ای ثبت نشده.</p></div>'}`;
   v.querySelectorAll('[data-gw]').forEach(b => b.onclick = () => { haptic(); renderFixtures(+b.dataset.gw); });
+  wireBack(v);
 }
 
 /* ============ LEAGUES ============ */
@@ -624,7 +634,7 @@ async function renderLeague(id) {
   const v = document.getElementById('view');
   const t = await api('/league/' + id);
   const myId = state.me?.entry?.id;
-  v.innerHTML = `
+  v.innerHTML = backHtml('leagues', 'لیگ‌ها') + `
     <div class="card glow" style="text-align:center">
       <div style="font-size:38px">🏆</div>
       <div class="h-title" style="justify-content:center;margin:6px 0 2px">${t.league.name}</div>
@@ -646,6 +656,7 @@ async function renderLeague(id) {
     const url = `https://t.me/share/url?url=${encodeURIComponent(cfgLink())}&text=${encodeURIComponent(`توی فانتزی لیگ برتر بیا! کد لیگ: ${t.league.code}`)}`;
     tg?.openTelegramLink(url);
   };
+  wireBack(v);
 }
 function cfgLink() { return location.origin + location.pathname; }
 
@@ -654,7 +665,7 @@ async function renderLeaderboard() {
   const v = document.getElementById('view');
   const lb = await api('/leaderboard');
   const myId = state.me?.entry?.id;
-  v.innerHTML = `
+  v.innerHTML = backHtml('home') + `
     <div class="card glow" style="text-align:center">
       <div style="font-size:38px">🥇</div>
       <div class="h-title" style="justify-content:center;margin:6px 0 2px">لیدربورد کل ایران</div>
@@ -662,6 +673,7 @@ async function renderLeaderboard() {
     </div>
     <div class="card"><div class="h-title">جدول کلی</div>
     ${lb.map((r, i) => lbRow(r, i, myId)).join('') || '<div class="empty"><div class="big">🏟</div><p>هنوز رقابتی شروع نشده.</p></div>'}</div>`;
+  wireBack(v);
 }
 
 /* ============ PROFILE ============ */
@@ -715,7 +727,7 @@ async function renderProfile() {
 /* ============ ADMIN ============ */
 async function renderAdmin() {
   const v = document.getElementById('view');
-  v.innerHTML = `
+  v.innerHTML = backHtml('profile') + `
     <div class="card"><div class="h-title">⚙️ پنل مدیریت</div>
       <div class="eyebrow">داده‌ها (خودکار)</div>
       <button class="btn sm" id="a-syncv3" style="margin-bottom:8px">sync نتایج فصل از ورزش‌سه</button>
@@ -733,7 +745,22 @@ async function renderAdmin() {
     catch (e) { toast(e.message, 'err'); }
   };
   document.getElementById('a-auto').onclick = async () => {
-    try { out('در حال استخراج آمار ۲ بازی... (۱-۳ دقیقه)'); const r = await api('/admin/auto-ingest', { method: 'POST', body: JSON.stringify({ limit: 2 }) }); out(r.map(x => `بازی ${x.fixture}: ${x.status}`).join(' | ')); toast('انجام شد ✅', 'ok'); }
+    try {
+      const r = await api('/admin/auto-ingest', { method: 'POST', body: JSON.stringify({ limit: 3 }) });
+      if (!r.started) { out('در حال اجراست، صبر کن…'); return; }
+      out('استخراج خودکار شروع شد… وضعیت را بررسی می‌کنم');
+      const poll = async (n) => {
+        if (n <= 0) { out('هنوز در حال اجراست؛ بعداً «در انتظار» را بزن'); return; }
+        await new Promise(rr => setTimeout(rr, 30000));
+        try {
+          const s = await api('/admin/ingest-status');
+          out(`در حال اجرا… ${faNum(s.pending)} بازی مانده`);
+          if (!s.running) { out(s.pending ? `${faNum(s.pending)} بازی مانده — دوباره بزن` : 'همه بازی‌ها آمار دارند ✅'); toast('انجام شد ✅', 'ok'); }
+          else poll(n - 1);
+        } catch (e) { out('خطا در بررسی وضعیت'); }
+      };
+      poll(20);
+    }
     catch (e) { toast(e.message, 'err'); }
   };
   document.getElementById('a-pend').onclick = async () => {
@@ -744,6 +771,7 @@ async function renderAdmin() {
     try { const r = await api('/admin/finish-gw/' + document.getElementById('a-gw').value, { method: 'POST' }); toast(`هفته بسته شد — ${r.playersScored} بازیکن`, 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
+  wireBack(v);
 }
 
 /* ============ ROUTER ============ */

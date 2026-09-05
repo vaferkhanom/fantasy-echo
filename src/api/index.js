@@ -55,7 +55,7 @@ router.get('/players', async (req, res) => {
   const { rows } = await query(`
     SELECT p.*, c.fa_name AS club, c.tier
     FROM players p JOIN clubs c ON c.id=p.club_id ORDER BY p.price DESC`);
-  res.json(rows);
+  res.json(rows.map(p => ({ ...p, price: Number(p.price) })));
 });
 
 router.get('/clubs', async (req, res) => {
@@ -146,16 +146,18 @@ router.get('/leaderboard', async (req, res) => {
 });
 
 // Fixtures + my gw history
-router.get('/fixtures', async (req, res) => {
+async function fixturesHandler(req, res) {
   const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
   const { rows } = await query(`
     SELECT f.*, c1.fa_name AS home, c1.en_name AS home_en, c2.fa_name AS away, c2.en_name AS away_en
     FROM fixtures f JOIN clubs c1 ON c1.id=f.home_club JOIN clubs c2 ON c2.id=f.away_club
     WHERE f.gw_id=$1 ORDER BY f.kickoff`, [gwId]);
   res.json({ gwId, fixtures: rows });
-});
+}
+router.get('/fixtures', fixturesHandler);
+router.get('/fixtures/:gw', fixturesHandler);
 
-router.get('/my-points', async (req, res) => {
+async function myPointsHandler(req, res) {
   const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
   const detail = await computeEntryGw(req.entry.id, gwId);
   const { rows } = await query(`
@@ -170,7 +172,9 @@ router.get('/my-points', async (req, res) => {
     WHERE s.entry_id=$1 AND s.gw_id=$2 ORDER BY s.slot`,
     [req.entry.id, gwId]);
   res.json({ gwId, total: detail ? detail.total : 0, detail: detail ? detail.detail : [], players: rows });
-});
+}
+router.get('/my-points', myPointsHandler);
+router.get('/my-points/:gw', myPointsHandler);
 
 // Admin
 router.post('/admin/seed-data', async (req, res) => {
