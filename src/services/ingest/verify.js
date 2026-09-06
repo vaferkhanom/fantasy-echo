@@ -38,28 +38,73 @@ const TIER_BONUS = { 5: 10, 4: 5, 3: 0, 2: 0, 1: 0 };
 let verifyRunning = false;
 let lastVerify = null;
 
+async function fetchAllSquads(clubs) {
+  const officialByClub = {};
+  const v3club = {};
+  for (const club of clubs) {
+    if (!club.v3id) continue;
+    let squad;
+    try { squad = await v3.apiGet(`/football/teams/${club.v3id}/squad`); }
+    catch (e) { continue; }
+    officialByClub[club.id] = [];
+    for (const g of (squad || [])) {
+      const pos = rolePos(g.role);
+      for (const p of (g.players || [])) {
+        officialByClub[club.id].push({
+          v3id: Number(p.id), name: p.name, pos,
+          portrait: p.portrait || null, shirt: p.shirtNumber || null
+        });
+        if (!v3club[Number(p.id)]) v3club[Number(p.id)] = club.id;
+      }
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return { officialByClub, v3club };
+}
+
+async function dedupePlayers(v3club) {
+  // one v3id -> exactly one row (in the official club); others cleared/removed
+  const { rows: dupes } = await query(
+    `SELECT v3id, array_agg(id ORDER BY id) AS ids FROM players
+     WHERE v3id IS NOT NULL GROUP BY v3id HAVING count(*) > 1`);
+  let fixed = 0, cleared = 0, removed = 0;
+  for (const d of dupes) {
+    const rightClub = v3club[d.v3id];
+    const { rows: rows } = await query(`SELECT * FROM players WHERE id = ANY($1) ORDER BY id`, [d.ids]);
+    // keep: row already in right club, else first row (moved to right club if known)
+    let keep = rows.find(r => rightClub && r.club_id === rightClub) || rows[0];
+    if (rightClub && keep.club_id !== rightClub) {
+      await query(`UPDATE players SET club_id=$1 WHERE id=$2`, [rightClub, keep.id]);
+      fixed++;
+    }
+    for (const r of rows) {
+      if (r.id === keep.id) continue;
+      const { rows: refs } = await query(
+        `SELECT (SELECT count(*) FROM stats_gw WHERE player_id=$1)
+              + (SELECT count(*) FROM points WHERE player_id=$1)
+              + (SELECT count(*) FROM squads WHERE player_id=$1) AS n`, [r.id]);
+      if (Number(refs[0].n) > 0) {
+        await query(`UPDATE players SET v3id=NULL, portrait=NULL, status='unverified' WHERE id=$1`, [r.id]);
+        cleared++;
+      } else {
+        await query(`DELETE FROM players WHERE id=$1`, [r.id]);
+        removed++;
+      }
+    }
+  }
+  return { fixed, cleared, removed, groups: dupes.length };
+}
+
 async function verifySquads() {
   if (verifyRunning) return { started: false };
   verifyRunning = true;
-  const report = { clubs: {}, added: 0, moved: 0, renamed: 0, repos: 0, photos: 0, deactivated: 0, deleted: 0, errors: [] };
+  const report = { clubs: {}, added: 0, moved: 0, renamed: 0, repos: 0, photos: 0, deactivated: 0, deleted: 0, dedup: null, errors: [] };
   try {
     const { rows: clubs } = await query(`SELECT * FROM clubs ORDER BY id`);
+    const { officialByClub, v3club } = await fetchAllSquads(clubs);
     for (const club of clubs) {
-      if (!club.v3id) { report.errors.push(`${club.fa_name}: no v3id`); continue; }
-      let squad;
-      try {
-        squad = await v3.apiGet(`/football/teams/${club.v3id}/squad`);
-      } catch (e) {
-        report.errors.push(`${club.fa_name}: squad fetch failed`);
-        continue;
-      }
-      const official = [];
-      for (const g of (squad || [])) {
-        const pos = rolePos(g.role);
-        for (const p of (g.players || [])) {
-          official.push({ v3id: Number(p.id), name: p.name, pos, portrait: p.portrait || null, shirt: p.shirtNumber || null });
-        }
-      }
+      const official = officialByClub[club.id] || [];
+      if (!official.length) { report.errors.push(`${club.fa_name}: no official squad`); continue; }
       const { rows: ours } = await query(`SELECT * FROM players WHERE club_id=$1`, [club.id]);
       const byV3 = new Map(ours.filter(p => p.v3id).map(p => [Number(p.v3id), p]));
       const seenOurs = new Set();
@@ -67,8 +112,10 @@ async function verifySquads() {
       for (const op of official) {
         let pl = byV3.get(op.v3id);
         if (!pl) {
-          // search by exact official name anywhere (transfer from another club)
-          const { rows: byName } = await query(`SELECT * FROM players WHERE fa_name=$1 LIMIT 5`, [op.name]);
+          // search by exact official name anywhere (transfer from another club),
+          // but only unlinked rows (linked rows belong to their v3 person already)
+          const { rows: byName } = await query(
+            `SELECT * FROM players WHERE fa_name=$1 AND v3id IS NULL LIMIT 5`, [op.name]);
           pl = byName[0] || null;
           if (!pl) {
             // whole-word fallback within this club
@@ -127,6 +174,7 @@ async function verifySquads() {
       report.repos += cRepos; report.photos += cPhotos;
       report.clubs[club.fa_name] = { official: official.length, added: cAdded, moved: cMoved, renamed: cRenamed, repos: cRepos };
     }
+    report.dedup = await dedupePlayers(v3club);
     lastVerify = { ok: true, at: new Date().toISOString(), ...report, errors: report.errors };
   } catch (e) {
     lastVerify = { ok: false, error: (e.message || '').slice(0, 200) };
