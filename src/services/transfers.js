@@ -35,7 +35,12 @@ async function freeAllowance(entryId, gwId) {
      WHERE entry_id=$1 AND gw_id<$2 GROUP BY gw_id`, [entryId, gwId]);
   const usedMap = {};
   for (const h of hist) usedMap[h.gw_id] = h.used;
-  const { rows: gws } = await query(`SELECT id FROM gameweeks WHERE id<$1 ORDER BY id`, [gwId]);
+  // banking accrues only from the entry's first squad week (no freebies for unplayed weeks)
+  const { rows: first } = await query(
+    `SELECT MIN(gw_id)::int AS g FROM squads WHERE entry_id=$1`, [entryId]);
+  const startGw = first[0].g || gwId;
+  const { rows: gws } = await query(
+    `SELECT id FROM gameweeks WHERE id<$1 AND id>=$2 ORDER BY id`, [gwId, startGw]);
   let bank = 0;
   for (const g of gws) {
     const avail = Math.min(5, C.freeTransfers + bank);
