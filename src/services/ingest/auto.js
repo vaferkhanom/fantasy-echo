@@ -364,4 +364,4 @@ async function autoIngestCycle(limit = 2) {
   }
 }
 
-module.exports = { autoIngestCycle, pendingFixtures, processFixture, normalizeFa, teamMatch, parseMatchDetail };
+module.exports = { autoIngestCycle, pendingFixtures, processFixture, normalizeFa, teamMatch, parseMatchDetail, normExact, resolveClubId };
