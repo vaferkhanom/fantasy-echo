@@ -56,10 +56,17 @@ async function recomputeAllForGw(gwId) {
   for (const e of entries) {
     const res = await computeEntryGw(e.id, gwId);
     if (res) {
-      await query(`UPDATE entries SET gw_points=$1 WHERE id=$2`, [res.total, e.id]);
+      await query(
+        `INSERT INTO entry_gw (entry_id, gw_id, points, hits) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (entry_id, gw_id) DO UPDATE SET points=EXCLUDED.points, hits=EXCLUDED.hits`,
+        [e.id, gwId, res.total, res.hits || 0]);
       n++;
     }
   }
+  await query(`
+    UPDATE entries e SET
+      gw_points = COALESCE((SELECT points FROM entry_gw WHERE entry_id=e.id ORDER BY gw_id DESC LIMIT 1), 0),
+      total_points = COALESCE((SELECT SUM(points) FROM entry_gw WHERE entry_id=e.id), 0)`);
   await refreshRanks();
   return n;
 }

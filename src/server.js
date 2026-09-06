@@ -69,8 +69,12 @@ async function main() {
     console.error('bot start failed:', err && err.message ? err.message : 'unknown');
   });
 
-  process.on('unhandledRejection', () => {});
-  process.on('uncaughtException', () => {});
+  process.on('unhandledRejection', (e) => {
+    try { console.error('unhandled:', (e && e.message) || 'unknown'); } catch (_) {}
+  });
+  process.on('uncaughtException', (e) => {
+    try { console.error('uncaught:', (e && e.message) || 'unknown'); } catch (_) {}
+  });
 }
 
 main().catch(e => {

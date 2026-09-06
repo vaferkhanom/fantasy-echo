@@ -142,6 +142,13 @@ CREATE TABLE IF NOT EXISTS price_hist (
   price INT NOT NULL,
   PRIMARY KEY (player_id, gw_id)
 );
+CREATE TABLE IF NOT EXISTS entry_gw (
+  entry_id BIGINT REFERENCES entries(id),
+  gw_id INT REFERENCES gameweeks(id),
+  points INT NOT NULL DEFAULT 0,
+  hits INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (entry_id, gw_id)
+);
 CREATE TABLE IF NOT EXISTS admin_signals (
   id BIGSERIAL PRIMARY KEY,
   gw_id INT,

@@ -3,6 +3,7 @@ const tg = window.Telegram?.WebApp;
 const state = { me: null, players: [], clubs: [], draft: null, gw: null, clubsById: {} };
 const FA_NUM = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
 const faNum = n => String(n).replace(/\d/g, d => FA_NUM[d]);
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const money = p => faNum(Number(p).toFixed(1));
 const posFa = { GKP: 'دروازه‌بان', DEF: 'دفاع', MID: 'هافبک', FWD: 'مهاجم' };
 const posTag = { GKP: 'gkp', DEF: 'def', MID: 'mid', FWD: 'fwd' };
@@ -142,6 +143,7 @@ async function renderHome() {
   const v = document.getElementById('view');
   v.innerHTML = `<div class="stat-grid">${'<div class="stat"><div class="v skel" style="height:24px"></div><div class="k">—</div></div>'.repeat(3)}</div><div class="card skel" style="height:120px"></div>`;
   const [boot, me] = await Promise.all([api('/boot'), api('/me').catch(() => null)]);
+  if (window.__navAlive && !window.__navAlive()) return;
   state.me = me; state.gw = boot.gw;
   renderTicker();
   const hasSquad = me?.squad?.length === 15;
@@ -211,6 +213,7 @@ async function renderHome() {
   const lfx = v.querySelector('#latest-fx');
   lfx.innerHTML = boot.latest.map(fxRow).join('') || '<div class="empty"><div class="big">🏟</div><p>هنوز بازی‌ای برگزار نشده.</p></div>';
   const lb = await api('/leaderboard').catch(() => []);
+  if (window.__navAlive && !window.__navAlive()) return;
   const myId = me?.entry?.id;
   v.querySelector('#lb-mini').innerHTML = lb.slice(0, 5).map((r, i) => lbRow(r, i, null)).join('') || '<p class="muted small">هنوز بازیکنی ثبت‌نام نکرده. اولین باش!</p>';
   v.querySelector('#btn-lb').onclick = () => { haptic(); renderLeaderboard(); };
@@ -230,7 +233,7 @@ function lbRow(r, i, myEntryId) {
   const name = r.team_name || r.first_name || '—';
   const me = myEntryId && (r.entry_id === myEntryId || r.id === myEntryId);
   return `<div class="lb-row ${me ? 'me' : ''}"><div class="lb-pos ${i < 3 ? 'top' + (i + 1) : ''}">${faNum(i + 1)}</div>
-    <div class="lb-name"><div class="n">${r.team_name || name}${me ? ' (تو)' : ''}</div><div class="muted small">${r.first_name || ''}</div></div>
+    <div class="lb-name"><div class="n">${esc(r.team_name || name)}${me ? ' (تو)' : ''}</div><div class="muted small">${esc(r.first_name || '')}</div></div>
     <div class="lb-pts num">${faNum(r.total_points)}<small>هفته ${faNum(r.gw_points)}</small></div></div>`;
 }
 function startCountdown(deadlineStr) {
@@ -279,6 +282,7 @@ async function renderMarket() {
     const clubs = await api('/clubs');
     state.clubsById = Object.fromEntries(clubs.map(c => [c.id, c]));
   }
+  if (window.__navAlive && !window.__navAlive()) return;
   let pos = 'all', sort = 'price-desc';
   const draw = () => {
     const q = v.querySelector('#q').value.trim();
@@ -306,14 +310,14 @@ function playerCard(p) {
   const c = state.clubsById[p.club_id];
   return `<div class="pl-card" data-id="${p.id}">
     ${avatar(p)}
-    <div class="pl-info"><div class="pl-name">${p.fa_name}</div>
+    <div class="pl-info"><div class="pl-name">${esc(p.fa_name)}</div>
       <div class="pl-club">${c ? `<span class="club-dot" style="background:${c.color1}"></span>` : ''}${p.club} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
     <div class="pl-price">${money(p.price)}<small>میلیون</small></div></div>`;
 }
 function playerSheet(id) {
   const p = state.players.find(x => x.id === id); if (!p) return;
-  sheet(`<h3 class="row">${avatar(p)}<span>${p.fa_name}</span></h3>
-    <p class="muted small">${p.en_name || ''} · ${p.club} · ${posFa[p.pos]}${p.is_foreign ? ' · 🌍 غیرایرانی' : ''}</p>
+  sheet(`<h3 class="row">${avatar(p)}<span>${esc(p.fa_name)}</span></h3>
+    <p class="muted small">${esc(p.en_name || '')} · ${esc(p.club)} · ${posFa[p.pos]}${p.is_foreign ? ' · 🌍 غیرایرانی' : ''}</p>
     <div class="stat-line"><span class="muted">قیمت</span><b class="num gold-t" style="font-size:18px">${money(p.price)} میلیون</b></div>
     <div class="stat-line"><span class="muted">پست</span><span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div>
     <div class="stat-line"><span class="muted">باشگاه</span><b>${p.club}</b></div>
@@ -335,6 +339,7 @@ const FORMATIONS = [
 async function renderSquad() {
   const v = document.getElementById('view');
   const me = await api('/me').catch(() => null);
+  if (window.__navAlive && !window.__navAlive()) return;
   if (me) state.me = me;
   if (!state.players.length) {
     state.players = (await api('/players')).map(p => ({ ...p, price: Number(p.price) }));
@@ -344,6 +349,7 @@ async function renderSquad() {
   if (!state.draft) {
     state.draft = initDraft(me?.squad || []);
   }
+  if (window.__navAlive && !window.__navAlive()) return;
   drawPitch();
 }
 
@@ -421,7 +427,7 @@ function drawPitch() {
   v.innerHTML = `
     <div class="row between" style="margin-bottom:10px">
       <div><div class="eyebrow">ترکیب تیم</div>
-      <div style="font-size:19px;font-weight:800">${state.me?.entry?.team_name || 'تیم من'}</div></div>
+      <div style="font-size:19px;font-weight:800">${esc(state.me?.entry?.team_name || 'تیم من')}</div></div>
       <div class="pill num ${t.n === 15 ? 'gold' : ''}">${faNum(t.n)} / ۱۵</div>
     </div>
     <div class="seg" style="margin-bottom:12px" id="fmtseg">
@@ -443,7 +449,7 @@ function drawPitch() {
       <div class="row between">
         <div><div class="muted small">هزینه تیم</div><b class="num" style="font-size:18px">${money(t.spent)}</b></div>
         <div style="text-align:center"><div class="muted small">موجودی بانک</div><b class="num green-t" style="font-size:18px">${money(Math.max(t.bank, 0))}</b></div>
-        <div style="text-align:left"><div class="muted small">کاپیتان ©️</div><b style="font-size:13px">${cap ? cap.fa_name : '—'}</b></div>
+        <div style="text-align:left"><div class="muted small">کاپیتان ©️</div><b style="font-size:13px">${cap ? esc(cap.fa_name) : '—'}</b></div>
       </div>
       <div class="row" style="gap:10px;margin-top:14px">
         <button class="btn green" id="btn-save" style="flex:1.4">ثبت تیم ✅</button>
@@ -480,12 +486,12 @@ function pjHtml(s, ptsMap, pos) {
     : `<span class="pt num">${money(p.price)}</span>`;
   const shirtInner = p.portrait ? `<img src="${p.portrait}" alt="" loading="lazy" onerror="this.remove()">` : p.pos[0];
   return `<button class="pj ${s.is_captain ? 'capt' : ''}" data-idx="${s.i ?? s.slot - 1}">
-    ${cap}${ptPill}<span class="shirt" style="${kitStyle(p)}">${shirtInner}</span><span class="nm">${p.fa_name}</span></button>`;
+    ${cap}${ptPill}<span class="shirt" style="${kitStyle(p)}">${shirtInner}</span><span class="nm">${esc(p.fa_name)}</span></button>`;
 }
 function slotSheet(idx) {
   const s = state.draft.slots[idx];
-  sheet(`<h3>${s.player.fa_name}</h3>
-    <p class="muted small">${s.player.club} · ${posFa[s.player.pos]} · ${money(s.player.price)}M</p>
+  sheet(`<h3>${esc(s.player.fa_name)}</h3>
+    <p class="muted small">${esc(s.player.club)} · ${posFa[s.player.pos]} · ${money(s.player.price)}M</p>
     <div class="row" style="gap:10px;flex-wrap:wrap">
       <button class="btn sm ghost" id="a-cap">${s.is_captain ? 'لغو کاپیتان' : '🅲 کاپیتان'}</button>
       <button class="btn sm ghost" id="a-vice">${s.is_vice ? 'لغو نایب' : '🆅 نایب'}</button>
@@ -520,8 +526,8 @@ function pickSheet(idx, onlyPos) {
 }
 function playerCardInner(p) {
   return `${avatar(p)}
-    <div class="pl-info"><div class="pl-name">${p.fa_name}</div>
-    <div class="pl-club">${p.club} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
+    <div class="pl-info"><div class="pl-name">${esc(p.fa_name)}</div>
+    <div class="pl-club">${esc(p.club)} · <span class="tag ${posTag[p.pos]}">${posFa[p.pos]}</span></div></div>
     <div class="pl-price">${money(p.price)}</div>`;
 }
 
@@ -562,6 +568,7 @@ function chipSheet() {
 async function renderMyPoints(gwId) {
   const v = document.getElementById('view');
   const d = await api('/my-points' + (gwId ? '/' + gwId : ''));
+  if (window.__navAlive && !window.__navAlive()) return;
   v.innerHTML = backHtml('home') + `
     <div class="card glow" style="text-align:center">
       <div class="eyebrow" style="justify-content:center">هفته ${faNum(d.gwId)}</div>
@@ -570,7 +577,7 @@ async function renderMyPoints(gwId) {
     </div>
     <div class="card"><div class="h-title">🧩 ترکیب و امتیازها</div>${d.players.map(p => `
       <div class="lb-row"><div class="lb-pos">${faNum(p.slot)}</div>
-      <div class="lb-name"><div class="n">${p.fa_name} ${p.pts > 0 ? `<b class="num green-t">+${faNum(p.pts)}</b>` : p.pts < 0 ? `<b class="num red-t">${faNum(p.pts)}</b>` : ''}</div>
+      <div class="lb-name"><div class="n">${esc(p.fa_name)} ${p.pts > 0 ? `<b class="num green-t">+${faNum(p.pts)}</b>` : p.pts < 0 ? `<b class="num red-t">${faNum(p.pts)}</b>` : ''}</div>
       <div class="muted small">${p.club} · ${posFa[p.pos]} · ${faNum(p.minutes || 0)} دقیقه${p.goals ? ` · ⚽ ${faNum(p.goals)}` : ''}${p.assists ? ` · 🅰️ ${faNum(p.assists)}` : ''}${p.bonus ? ` · ⭐ ${faNum(p.bonus)}` : ''}</div></div></div>`).join('')}
     </div>`;
   countUp(v.querySelector('#gw-total'), d.total);
@@ -581,6 +588,7 @@ async function renderMyPoints(gwId) {
 async function renderFixtures(gwId) {
   const v = document.getElementById('view');
   const d = await api('/fixtures' + (gwId ? '/' + gwId : ''));
+  if (window.__navAlive && !window.__navAlive()) return;
   const gws = Array.from({ length: 7 }, (_, i) => d.gwId - 3 + i).filter(g => g >= 1 && g <= 34);
   const live = d.fixtures.filter(f => !f.finished).length;
   v.innerHTML = backHtml('home') + `
@@ -605,6 +613,7 @@ async function renderFixtures(gwId) {
 async function renderLeagues() {
   const v = document.getElementById('view');
   const list = await api('/leagues').catch(() => []);
+  if (window.__navAlive && !window.__navAlive()) return;
   v.innerHTML = `
     <div class="row" style="gap:10px;margin-bottom:14px">
       <button class="btn" id="btn-new" style="flex:1">🏟 لیگ جدید</button>
@@ -612,7 +621,7 @@ async function renderLeagues() {
     </div>
     ${list.length ? `<div class="card"><div class="h-title">لیگ‌های من</div>` + list.map(l => `<div class="pl-card" data-lg="${l.id}">
       <div class="pl-ava" style="background:linear-gradient(135deg,#ffe08a,#f5c518);font-size:20px">🏆</div>
-      <div class="pl-info"><div class="pl-name">${l.name}</div><div class="pl-club">${faNum(l.members)} مدیر · کد ${l.code}</div></div></div>`).join('') + '</div>'
+      <div class="pl-info"><div class="pl-name">${esc(l.name)}</div><div class="pl-club">${faNum(l.members)} مدیر · کد ${l.code}</div></div></div>`).join('') + '</div>'
       : `<div class="card"><div class="empty"><div class="big">🏟</div>
         <p>هنوز لیگی نداری! یک لیگ بساز، کدش را با دوستانت قسمت کن و ببین کی بهتر تیم می‌چیند.</p>
         <button class="btn sm" id="btn-new2">ساخت اولین لیگ</button></div></div>`}`;
@@ -642,11 +651,12 @@ async function renderLeagues() {
 async function renderLeague(id) {
   const v = document.getElementById('view');
   const t = await api('/league/' + id);
+  if (window.__navAlive && !window.__navAlive()) return;
   const myId = state.me?.entry?.id;
   v.innerHTML = backHtml('leagues', 'لیگ‌ها') + `
     <div class="card glow" style="text-align:center">
       <div style="font-size:38px">🏆</div>
-      <div class="h-title" style="justify-content:center;margin:6px 0 2px">${t.league.name}</div>
+      <div class="h-title" style="justify-content:center;margin:6px 0 2px">${esc(t.league.name)}</div>
       <p class="muted small">${faNum(t.members.length)} مدیر در این لیگ</p>
       <div class="code-box"><span class="muted small">کد دعوت</span><b>${t.league.code}</b>
       <button class="btn sm ghost" id="copy">کپی</button></div>
@@ -673,6 +683,7 @@ function cfgLink() { return location.origin + location.pathname; }
 async function renderLeaderboard() {
   const v = document.getElementById('view');
   const lb = await api('/leaderboard');
+  if (window.__navAlive && !window.__navAlive()) return;
   const myId = state.me?.entry?.id;
   v.innerHTML = backHtml('home') + `
     <div class="card glow" style="text-align:center">
@@ -689,12 +700,13 @@ async function renderLeaderboard() {
 async function renderProfile() {
   const v = document.getElementById('view');
   const me = await api('/me');
+  if (window.__navAlive && !window.__navAlive()) return;
   state.me = me;
   v.innerHTML = `
     <div class="card glow" style="text-align:center">
       <div style="font-size:44px">👤</div>
-      <div class="h-title" style="justify-content:center;margin:8px 0 2px">${me.user.name || 'بازیکن'}</div>
-      <p class="muted small" style="margin:0 0 12px">${me.user.username ? '@' + me.user.username : ''} · <span class="num">${me.user.id}</span></p>
+      <div class="h-title" style="justify-content:center;margin:8px 0 2px">${esc(me.user.name || 'بازیکن')}</div>
+      <p class="muted small" style="margin:0 0 12px">${me.user.username ? '@' + esc(me.user.username) : ''} · <span class="num">${me.user.id}</span></p>
       <div class="row" style="justify-content:center;gap:22px;margin-top:6px">
         <div><b class="num gold-t" style="font-size:22px" id="pf-pts">0</b><div class="muted small">امتیاز</div></div>
         <div><b class="num" style="font-size:22px">${faNum(me.entry.overall_rank || '—')}</b><div class="muted small">رتبه</div></div>
@@ -786,10 +798,14 @@ async function renderAdmin() {
 /* ============ ROUTER ============ */
 const TABS = { home: renderHome, squad: renderSquad, market: renderMarket, leagues: renderLeagues, profile: renderProfile };
 let current = '';
+let navSeq = 0;
 function go(tab, arg) {
+  const my = ++navSeq;
   current = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  window.__navAlive = () => my === navSeq;
   (TABS[tab] || renderHome)(arg).catch(e => {
+    if (my !== navSeq) return; // stale navigation
     if (/401|unauthorized/.test(e.message)) renderSplash();
     else toast(e.message, 'err');
   });

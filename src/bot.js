@@ -176,22 +176,21 @@ async function onNewLeague(msg, arg) {
   });
 }
 
-// ---- Admin ----
+// ---- Admin (non-blocking: ack first, work in background) ----
 async function onAdmin(msg, arg) {
   if (!isAdmin(msg.from.id)) return;
   const [cmd, ...rest] = arg.split(' ');
-  try {
+  const run = async () => {
     if (cmd === 'sync') {
       const r = await syncSeason();
-      return reply(msg, `sync done: +${r.fixtures} new, ${r.updated} updated`);
+      return `sync done: +${r.fixtures} new, ${r.updated} updated`;
     }
     if (cmd === 'finish') {
       const gw = Number(rest[0]);
       const r = await finishGw(gw);
-      return reply(msg, `gw ${gw} finished, ${r.playersScored} players scored`);
+      return `gw ${gw} finished, ${r.playersScored} players scored`;
     }
     if (cmd === 'stat') {
-      // /admin stat <gw> <playerId> key=val key=val...
       const gw = Number(rest[0]), pid = Number(rest[1]);
       const obj = {};
       for (const kv of rest.slice(2)) {
@@ -199,12 +198,14 @@ async function onAdmin(msg, arg) {
         if (k) obj[k] = Number(v);
       }
       await upsertSignal(gw, pid, obj, msg.from.id);
-      return reply(msg, `stat saved for player ${pid} in gw ${gw}`);
+      return `stat saved for player ${pid} in gw ${gw}`;
     }
-    return reply(msg, 'admin cmds: sync | finish <gw> | stat <gw> <playerId> k=v ...');
-  } catch (e) {
-    return reply(msg, 'error: ' + esc(e.message));
-  }
+    return 'admin cmds: sync | finish <gw> | stat <gw> <playerId> k=v ...';
+  };
+  reply(msg, '⏳ در حال انجام…').catch(() => {});
+  run()
+    .then(out => reply(msg, out).catch(() => {}))
+    .catch(e => reply(msg, 'error: ' + esc(e.message).slice(0, 200)).catch(() => {}));
 }
 
 async function reply(msg, text) {

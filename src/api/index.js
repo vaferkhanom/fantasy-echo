@@ -218,6 +218,9 @@ router.get('/leagues', async (req, res) => {
 
 router.get('/league/:id', async (req, res) => {
   try {
+    const { rows: mem } = await query(
+      `SELECT 1 FROM league_members WHERE league_id=$1 AND entry_id=$2`, [Number(req.params.id), req.entry.id]);
+    if (!mem[0] && !req.isAdmin) return res.status(403).json({ error: 'عضو این لیگ نیستی' });
     const t = await leagueTable(Number(req.params.id), null);
     res.json(t);
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -355,12 +358,13 @@ router.post('/admin/signal', async (req, res) => {
 });
 router.get('/admin/queue', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const gw = Number(req.query.gw) || (await currentGw())?.id || 1;
   const { rows } = await query(`
     SELECT p.id, p.fa_name, c.fa_name AS club, p.pos
     FROM players p JOIN clubs c ON c.id=p.club_id
     WHERE c.id IN (SELECT home_club FROM fixtures WHERE gw_id=$1 AND finished
                    UNION SELECT away_club FROM fixtures WHERE gw_id=$1 AND finished)
-    ORDER BY c.id, p.pos`, [req.body.gw || 1]);
+    ORDER BY c.id, p.pos`, [gw]);
   res.json(rows);
 });
 
