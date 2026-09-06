@@ -29,13 +29,24 @@ function teamMatch(a, b) {
   if (!x || !y) return false;
   return x.includes(y) || y.includes(x);
 }
-/* exact normalized match first (keeps city suffixes!), fuzzy fallback */
+/* exact normalized match first (keeps city suffixes!), then city-stripped
+ * match only if UNAMBIGUOUS (protects استقلال vs استقلال خوزستان). */
 function resolveClubId(name, clubs) {
   const n = normExact(name);
   let hit = clubs.find(c => normExact(c.fa_name) === n);
   if (hit) return hit.id;
-  hit = clubs.find(c => teamMatch(c.fa_name, name));
-  return hit ? hit.id : null;
+  const stripped = s => {
+    let t = normExact(s);
+    for (const w of CITY_WORDS) t = t.split(w).join(' ');
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  const sn = stripped(name);
+  const cands = clubs.filter(c => {
+    const cs = stripped(c.fa_name);
+    return cs && sn && (cs === sn || cs.includes(sn) || sn.includes(cs));
+  });
+  if (cands.length === 1) return cands[0].id;
+  return null;
 }
 
 const TIER_BASE = { GKP: 40, DEF: 40, MID: 45, FWD: 45 };

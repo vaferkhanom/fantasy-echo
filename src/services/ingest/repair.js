@@ -28,6 +28,11 @@ async function reconcileRound(gw, truthMatches, log) {
         adopted++;
         continue;
       }
+      // never delete unfinished (future schedule) rows
+      if (!f.finished) {
+        log.push(`gw${gw}: keeping unfinished fixture ${f.id} (not in played truth)`);
+        continue;
+      }
       await query(`DELETE FROM fixtures WHERE id=$1`, [f.id]);
       log.push(`gw${gw}: deleted bogus fixture ${f.id}`);
       deleted++;
@@ -75,22 +80,24 @@ async function repairAllAsync() {
     const rounds = await v3.resultsAll();
     // authoritative v3teamId -> club (exact only)
     const teamClub = new Map();
-    for (const r of rounds) {
-      for (const dg of (r.dates || [])) {
-        for (const mt of (dg.matches || [])) {
-          for (const side of ['host', 'guest']) {
-            const t = mt[side];
-            const hit = clubs.find(c => auto.normExact(c.fa_name) === auto.normExact(t.name));
-            if (hit) {
-              teamClub.set(String(t.id), hit.id);
-              if (clubs.find(c => c.id === hit.id).v3id !== String(t.id)) {
-                await query(`UPDATE clubs SET v3id=$1 WHERE id=$2`, [String(t.id), hit.id]);
-              }
+  for (const r of rounds) {
+    for (const dg of (r.dates || [])) {
+      for (const mt of (dg.matches || [])) {
+        for (const side of ['host', 'guest']) {
+          const t = mt[side];
+          const cid = auto.resolveClubId(t.name, clubs);
+          if (cid) {
+            teamClub.set(String(t.id), cid);
+            if (clubs.find(c => c.id === cid).v3id !== String(t.id)) {
+              await query(`UPDATE clubs SET v3id=$1 WHERE id=$2`, [String(t.id), cid]);
             }
+          } else {
+            log.push(`unmapped v3 team: ${t.name}`);
           }
         }
       }
     }
+  }
 
     const affectedGws = new Set();
     for (const r of rounds) {
