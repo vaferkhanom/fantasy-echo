@@ -33,11 +33,12 @@ async function refreshGwFlags() {
       is_current = (agg.first_kick <= now() AND agg.last_kick + interval '3 hours' > now() AND agg.fin < agg.total)
     FROM agg WHERE agg.gw_id = g.id
   `);
-  // exactly one next: the earliest future gameweek
+  // exactly one next: the earliest UNFINISHED future gameweek
   await query(`
     WITH nxt AS (
       SELECT g.id FROM gameweeks g JOIN fixtures f ON f.gw_id=g.id
-      WHERE f.kickoff > now() GROUP BY g.id ORDER BY MIN(f.kickoff) LIMIT 1
+      WHERE g.is_finished = false AND f.kickoff > now()
+      GROUP BY g.id ORDER BY MIN(f.kickoff) LIMIT 1
     ) UPDATE gameweeks SET is_next=true WHERE id IN (SELECT id FROM nxt)
   `);
   // If nothing is current/next (e.g. between seasons), fallback: first unfished gw

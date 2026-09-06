@@ -19,8 +19,7 @@ async function finishGw(gwId, opts = {}) {
   const withBonus = opts.bonus !== false;
   const T = (s) => console.log(`[finish:${gwId}] ${s} +${Date.now() - t0}ms`);
   const t0 = Date.now();
-  await query(`UPDATE gameweeks SET is_finished=true WHERE id=$1`, [gwId]);
-  T('marked finished');
+  T('start');
 
   const conceded = await gwTeamConceded(gwId);
   const { rows: players } = await query(`SELECT id, pos, club_id FROM players`);
@@ -66,7 +65,13 @@ async function finishGw(gwId, opts = {}) {
   await logPrices(gwId);
   await refreshRanks();
   await refreshGwFlags();
-  return { playersScored: Object.keys(scored).length, gwId };
+  const { rows: rem2 } = await query(
+    `SELECT count(*) FILTER (WHERE NOT finished)::int AS open,
+            count(*)::int AS total FROM fixtures WHERE gw_id=$1`, [gwId]);
+  const done = rem2[0].total > 0 && rem2[0].open === 0;
+  await query(`UPDATE gameweeks SET is_finished=$1 WHERE id=$2`, [done, gwId]);
+  T(done ? 'marked finished' : 'left open');
+  return { playersScored: Object.keys(scored).length, gwId, finished: done };
 }
 
 async function upsertSignal(gwId, playerId, signalObj, adminId) {

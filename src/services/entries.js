@@ -50,8 +50,6 @@ async function computeEntryGw(entryId, gwId) {
 
 async function recomputeAllForGw(gwId) {
   const { rows: entries } = await query(`SELECT id FROM entries`);
-  const { rows: gw } = await query(`SELECT * FROM gameweeks WHERE id=$1`, [gwId]);
-  if (!gw[0] || !gw[0].is_finished) return 0;
   let n = 0;
   for (const e of entries) {
     const res = await computeEntryGw(e.id, gwId);
