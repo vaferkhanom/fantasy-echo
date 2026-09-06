@@ -414,6 +414,10 @@ function drawPitch() {
     return items.map(s => pjHtml(s)).concat(Array(empties).fill(pjHtml({ player: null }, null, pos))).join('');
   };
   const cap = d.slots.find(s => s.is_captain && s.player)?.player;
+  const tr = state.me?.transfers;
+  const trLine = tr && (tr.made > 0 || tr.hits > 0)
+    ? `<div class="small" style="margin-top:8px;color:${tr.hits ? 'var(--card-red)' : 'var(--mist)'}">نقل‌وانتقالات: ${faNum(tr.made)} (رایگان: ${tr.unlimited ? 'نامحدود 🃏' : faNum(Math.min(tr.made, tr.free))}${tr.hits ? ` · جریمه: ${faNum(tr.hitsCost)}-` : ''})</div>`
+    : (tr && !tr.unlimited ? `<div class="small faint" style="margin-top:8px">تعویض رایگان باقی‌مانده: ${faNum(tr.free)}</div>` : '');
   v.innerHTML = `
     <div class="row between" style="margin-bottom:10px">
       <div><div class="eyebrow">ترکیب تیم</div>
@@ -445,6 +449,7 @@ function drawPitch() {
         <button class="btn green" id="btn-save" style="flex:1.4">ثبت تیم ✅</button>
         <button class="btn ghost" id="btn-chip" style="flex:1">🎁 چیپ</button>
       </div>
+      ${trLine}
     </div>`;
   v.querySelectorAll('#fmtseg button').forEach(b => b.onclick = () => {
     haptic();
@@ -526,8 +531,12 @@ async function saveSquad() {
   const slots = d.slots.map(s => ({ player_id: s.player.id, slot: s.slot, is_captain: s.is_captain, is_vice: s.is_vice }));
   const starting = slots.filter(s => s.slot <= 11).map(s => s.player ? state.players.find(p => p.id === s.player_id).pos : null);
   try {
-    await api('/squad', { method: 'POST', body: JSON.stringify({ slots }) });
-    confetti(); toast('تیم ثبت شد! 🎉', 'ok');
+    const r = await api('/squad', { method: 'POST', body: JSON.stringify({ slots }) });
+    const t = r.transfers || {};
+    confetti(); toast(t.hits ? `ثبت شد! ${faNum(t.hits)} هیت (${faNum(t.cost)}-) ⚠️` : 'تیم ثبت شد! 🎉', t.hits ? 'err' : 'ok');
+    state.draft = null;
+    const me = await api('/me').catch(() => null);
+    if (me) state.me = me;
     go('home');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -557,7 +566,7 @@ async function renderMyPoints(gwId) {
     <div class="card glow" style="text-align:center">
       <div class="eyebrow" style="justify-content:center">هفته ${faNum(d.gwId)}</div>
       <div class="num gold-t pop" style="font-size:52px;font-weight:700;line-height:1" id="gw-total">0</div>
-      <div class="muted small">امتیاز این هفته</div>
+      <div class="muted small">امتیاز این هفته${d.hits ? ` <span class="red-t">(شامل ${faNum(d.hits)} جریمه تعویض)</span>` : ''}</div>
     </div>
     <div class="card"><div class="h-title">🧩 ترکیب و امتیازها</div>${d.players.map(p => `
       <div class="lb-row"><div class="lb-pos">${faNum(p.slot)}</div>

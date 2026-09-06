@@ -4,6 +4,7 @@ const C = require('../config').leetcode;
 const { scoreFixture } = require('./scoring');
 const { autoSubs, captainTimes, playersInGw } = require('./squad');
 const { activeChips } = require('./chips');
+const { hitsFor } = require('./transfers');
 
 /*
  * Recalculate points for a finished GW for one entry.
@@ -42,7 +43,9 @@ async function computeEntryGw(entryId, gwId) {
     total += pt;
     detail.push({ player_id: p.player_id, slot: p.slot, pts: pt, isCap, played: (minutes[p.player_id] || 0) > 0 });
   }
-  return { total, detail };
+  const hits = await hitsFor(entryId, gwId);
+  total -= hits;
+  return { total, detail, hits };
 }
 
 async function recomputeAllForGw(gwId) {
