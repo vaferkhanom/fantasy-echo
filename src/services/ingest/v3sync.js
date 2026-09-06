@@ -81,10 +81,11 @@ async function clubIdByV3(v3id, faName) {
   const { rows } = await query(`SELECT id FROM clubs WHERE v3id=$1`, [String(v3id)]);
   if (rows[0]) return rows[0].id;
   const { rows: all } = await query(`SELECT id, fa_name FROM clubs`);
-  const hit = all.find(c => teamMatch(c.fa_name, faName));
+  const { resolveClubId } = require('./auto');
+  const hit = resolveClubId(faName, all);
   if (hit) {
-    await query(`UPDATE clubs SET v3id=$1 WHERE id=$2`, [String(v3id), hit.id]);
-    return hit.id;
+    await query(`UPDATE clubs SET v3id=$1 WHERE id=$2`, [String(v3id), hit]);
+    return hit;
   }
   return null;
 }

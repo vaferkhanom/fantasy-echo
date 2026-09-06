@@ -20,10 +20,22 @@ function stripCity(s) {
   for (const w of CITY_WORDS) t = t.replace(new RegExp(w, 'g'), ' ');
   return t.replace(/\s+/g, ' ').trim();
 }
+function normExact(s) {
+  return String(s || '').replace(/[\u200c\u200b]/g, ' ').replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+    .replace(/\s+/g, ' ').trim();
+}
 function teamMatch(a, b) {
   const x = stripCity(a), y = stripCity(b);
   if (!x || !y) return false;
   return x.includes(y) || y.includes(x);
+}
+/* exact normalized match first (keeps city suffixes!), fuzzy fallback */
+function resolveClubId(name, clubs) {
+  const n = normExact(name);
+  let hit = clubs.find(c => normExact(c.fa_name) === n);
+  if (hit) return hit.id;
+  hit = clubs.find(c => teamMatch(c.fa_name, name));
+  return hit ? hit.id : null;
 }
 
 const TIER_BASE = { GKP: 40, DEF: 40, MID: 45, FWD: 45 };
@@ -243,18 +255,25 @@ function validateParsed(fx, per, homeClub, awayClub, rosterClub) {
 
 async function findV3Match(fx, cmap, cache) {
   if (!cache.rounds) cache.rounds = await v3.resultsAll();
-  for (const r of cache.rounds) {
-    const m = String(r.round || '').match(/(\d+)/);
-    if (!m || Number(m[1]) !== fx.gw_id) continue;
-    for (const dg of (r.dates || [])) {
-      for (const mt of (dg.matches || [])) {
-        if (teamMatch(mt.host.name, cmap[fx.home_club]) && teamMatch(mt.guest.name, cmap[fx.away_club])) {
-          return mt;
+  const tryPass = (exact) => {
+    for (const r of cache.rounds) {
+      const m = String(r.round || '').match(/(\d+)/);
+      if (!m || Number(m[1]) !== fx.gw_id) continue;
+      for (const dg of (r.dates || [])) {
+        for (const mt of (dg.matches || [])) {
+          const h = exact
+            ? normExact(mt.host.name) === normExact(cmap[fx.home_club])
+            : teamMatch(mt.host.name, cmap[fx.home_club]);
+          const a = exact
+            ? normExact(mt.guest.name) === normExact(cmap[fx.away_club])
+            : teamMatch(mt.guest.name, cmap[fx.away_club]);
+          if (h && a) return mt;
         }
       }
     }
-  }
-  return null;
+    return null;
+  };
+  return tryPass(true) || tryPass(false);
 }
 
 async function processFixture(fx, cache = {}) {
