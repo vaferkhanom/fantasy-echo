@@ -46,10 +46,17 @@ router.get('/me', async (req, res) => {
   const made = editGw ? await transferCount(req.entry.id, editGw.id).catch(() => 0) : 0;
   const hits = editGw ? await hitsFor(req.entry.id, editGw.id).catch(() => 0) : 0;
   const spent = owned.reduce((s, x) => s + Number(x.price), 0);
+  // latest squad in any gw (for prefill when edit gw has none yet)
+  const { rows: latest } = await query(`
+    SELECT s.player_id, s.slot, s.is_captain, s.is_vice, p.fa_name, p.en_name, p.pos, p.price, p.club_id, c.fa_name AS club
+    FROM squads s JOIN players p ON p.id=s.player_id JOIN clubs c ON c.id=p.club_id
+    WHERE s.entry_id=$1 AND s.gw_id = (SELECT MAX(gw_id) FROM squads WHERE entry_id=$1)
+    ORDER BY s.slot`, [req.entry.id]);
   res.json({
     user: { id: req.user.tg_id, name: req.user.first_name, username: req.user.username, photo: req.user.photo_url },
     entry: rows[0],
     squad: owned.map(s => ({ ...s, price: Number(s.price) })),
+    latestSquad: latest.map(s => ({ ...s, price: Number(s.price) })),
     squadGw: editGw ? editGw.id : null,
     gw,
     leagues: lg[0].n,

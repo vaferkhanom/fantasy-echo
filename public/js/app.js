@@ -347,7 +347,8 @@ async function renderSquad() {
     state.clubsById = Object.fromEntries(clubs.map(c => [c.id, c]));
   }
   if (!state.draft) {
-    state.draft = initDraft(me?.squad || []);
+    const base = (me?.squad?.length === 15) ? me.squad : (me?.latestSquad?.length === 15 ? me.latestSquad : []);
+    state.draft = initDraft(base);
   }
   if (window.__navAlive && !window.__navAlive()) return;
   drawPitch();
@@ -736,7 +737,8 @@ async function renderProfile() {
     </div>`;
   document.getElementById('savetn').onclick = async () => {
     haptic();
-    const slots = me.squad.map(s => ({ player_id: s.player_id, slot: s.slot, is_captain: s.is_captain, is_vice: s.is_vice }));
+    const src = me.squad.length === 15 ? me.squad : me.latestSquad;
+    const slots = (src || []).map(s => ({ player_id: s.player_id, slot: s.slot, is_captain: s.is_captain, is_vice: s.is_vice }));
     if (slots.length === 15) {
       await api('/squad', { method: 'POST', body: JSON.stringify({ slots, teamName: document.getElementById('tn').value }) });
       toast('ذخیره شد ✅', 'ok');
