@@ -218,9 +218,18 @@ router.post('/admin/sync-v3', async (req, res) => {
 });
 router.post('/admin/repair', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
-  const { repairAll } = require('../services/ingest/repair');
-  const r = await repairAll();
-  res.json(r);
+  const { repairAllAsync, getRepairStatus } = require('../services/ingest/repair');
+  const cur = getRepairStatus();
+  if (cur.running) return res.json({ started: false, reason: 'already-running' });
+  repairAllAsync()
+    .then(r => console.log('[repair] done:', JSON.stringify(r).slice(0, 300)))
+    .catch(e => console.log('[repair] error:', e && e.message));
+  res.json({ started: true });
+});
+router.get('/admin/repair-status', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { getRepairStatus } = require('../services/ingest/repair');
+  res.json(getRepairStatus());
 });
 router.post('/admin/finish-gw/:gw', async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
