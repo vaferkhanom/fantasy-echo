@@ -35,17 +35,28 @@ async function reconcileRound(gw, truthMatches, log) {
       used.add(t.v3id);
     }
   }
-  // missing truth matches -> insert
-  const { rows: ours2 } = await query(`SELECT varzesh3_id FROM fixtures WHERE gw_id=$1`, [gw]);
+  // missing truth matches -> adopt into unlinked same-club row or insert
+  const { rows: ours2 } = await query(`SELECT id, varzesh3_id, home_club, away_club FROM fixtures WHERE gw_id=$1`, [gw]);
   const have = new Set(ours2.map(r => String(r.varzesh3_id)));
   let inserted = 0;
   for (const t of truthMatches) {
-    if (!have.has(t.v3id)) {
-      await query(
-        `INSERT INTO fixtures (gw_id, varzesh3_id, home_club, away_club, home_goals, away_goals, finished, source)
-         VALUES ($1,$2,$3,$4,$5,$6,true,'v3')`,
-        [gw, t.v3id, t.home, t.away, t.gh, t.ga]);
-      inserted++;
+    if (have.has(t.v3id)) continue;
+    const sameClubs = ours2.find(r => !r.varzesh3_id && r.home_club === t.home && r.away_club === t.away);
+    if (sameClubs) {
+      await query(`UPDATE fixtures SET varzesh3_id=$1, home_goals=$2, away_goals=$3, finished=true, locked_at=NULL WHERE id=$4`,
+        [t.v3id, t.gh, t.ga, sameClubs.id]);
+      adopted++;
+    } else {
+      try {
+        await query(
+          `INSERT INTO fixtures (gw_id, varzesh3_id, home_club, away_club, home_goals, away_goals, finished, source)
+           VALUES ($1,$2,$3,$4,$5,$6,true,'v3')`,
+          [gw, t.v3id, t.home, t.away, t.gh, t.ga]);
+        inserted++;
+      } catch (e) {
+        if (!/duplicate|unique/.test(e.message)) throw e;
+        log.push(`gw${gw}: skipped duplicate insert (${t.v3id})`);
+      }
     }
   }
   return { adopted, deleted, inserted };
@@ -83,6 +94,7 @@ async function repairAllAsync() {
 
     const affectedGws = new Set();
     for (const r of rounds) {
+      try {
       const m = String(r.round || '').match(/(\d+)/);
       if (!m) continue;
       const gw = Number(m[1]);
@@ -110,9 +122,17 @@ async function repairAllAsync() {
         if (!t) continue;
         if (t.home !== f.home_club || t.away !== f.away_club) {
           log.push(`gw${gw}: fix fixture ${f.id} clubs (${f.home_club},${f.away_club})->(${t.home},${t.away})`);
-          await fixFixtureClubs(f, t, log);
+          try {
+            await fixFixtureClubs(f, t, log);
+          } catch (e) {
+            log.push(`gw${gw}: fix fixture ${f.id} failed: ${(e.message || '').slice(0, 120)}`);
+            continue;
+          }
           affectedGws.add(gw);
         }
+      }
+      } catch (e) {
+        log.push(`round ${r.round} failed: ${(e.message || '').slice(0, 120)}`);
       }
     }
 
@@ -170,18 +190,26 @@ async function fixFixtureClubs(f, t, log) {
       }
     }
   }
+  // FIRST remove rows that would collide with the corrected clubs (unique constraint),
+  // keeping the one that already has stats if any
+  const { rows: rivals } = await query(
+    `SELECT id, stats_applied FROM fixtures
+     WHERE gw_id=$1 AND home_club=$2 AND away_club=$3 AND id<>$4`,
+    [f.gw_id, t.home, t.away, f.id]);
+  for (const rp of rivals) {
+    if (!rp.stats_applied) {
+      await query(`DELETE FROM fixtures WHERE id=$1`, [rp.id]);
+      log.push(`fixture ${f.id}: deleted rival row ${rp.id} (no stats)`);
+    } else {
+      // rival has stats: merge by adopting its stats flag, then delete it
+      await query(`DELETE FROM fixtures WHERE id=$1`, [rp.id]);
+      log.push(`fixture ${f.id}: deleted rival row ${rp.id} (had stats; will re-extract)`);
+    }
+  }
   await query(
     `UPDATE fixtures SET home_club=$1, away_club=$2, home_goals=$3, away_goals=$4,
       finished=true, stats_applied=false, stats_source='repaired', locked_at=NULL WHERE id=$5`,
     [t.home, t.away, t.gh, t.ga, f.id]);
-  // drop duplicate rows for the same pairing
-  const { rows: dupes } = await query(
-    `SELECT id, stats_applied FROM fixtures
-     WHERE gw_id=$1 AND home_club=$2 AND away_club=$3 AND id<>$4`,
-    [f.gw_id, t.home, t.away, f.id]);
-  for (const dp of dupes) {
-    if (!dp.stats_applied) await query(`DELETE FROM fixtures WHERE id=$1`, [dp.id]);
-  }
 }
 
 module.exports = { repairAllAsync, getRepairStatus: () => ({ running: repairRunning, last: lastRepair }) };
