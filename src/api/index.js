@@ -54,8 +54,30 @@ router.get('/me', async (req, res) => {
 router.get('/players', async (req, res) => {
   const { rows } = await query(`
     SELECT p.*, c.fa_name AS club, c.tier
-    FROM players p JOIN clubs c ON c.id=p.club_id ORDER BY p.price DESC`);
+    FROM players p JOIN clubs c ON c.id=p.club_id
+    WHERE p.status='ok' ORDER BY p.price DESC`);
   res.json(rows.map(p => ({ ...p, price: Number(p.price) })));
+});
+router.post('/admin/verify', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { verifySquads, getVerifyStatus } = require('../services/ingest/verify');
+  if (getVerifyStatus().running) return res.json({ started: false });
+  verifySquads()
+    .then(r => console.log('[verify] done, added:', r.added, 'moved:', r.moved, 'renamed:', r.renamed))
+    .catch(e => console.log('[verify] error:', e && e.message));
+  res.json({ started: true });
+});
+router.get('/admin/verify-status', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { getVerifyStatus } = require('../services/ingest/verify');
+  res.json(getVerifyStatus());
+});
+router.get('/admin/export-seed', async (req, res) => {
+  if (!req.isAdmin) return res.status(403).json({ error: 'forbidden' });
+  const { rows: clubs } = await query(`SELECT * FROM clubs ORDER BY id`);
+  const { rows: players } = await query(
+    `SELECT p.*, c.slug AS club_slug FROM players p JOIN clubs c ON c.id=p.club_id ORDER BY c.id, p.pos, p.fa_name`);
+  res.json({ clubs, players: players.map(p => ({ ...p, price: Number(p.price) })) });
 });
 
 router.get('/clubs', async (req, res) => {
