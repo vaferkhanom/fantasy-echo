@@ -29,22 +29,21 @@ function teamMatch(a, b) {
   if (!x || !y) return false;
   return x.includes(y) || y.includes(x);
 }
-/* exact normalized match first (keeps city suffixes!), then city-stripped
- * match only if UNAMBIGUOUS (protects استقلال vs استقلال خوزستان). */
+/* exact normalized match first (keeps city suffixes!), then whole-word
+ * token match after removing city words, only if UNAMBIGUOUS
+ * (protects استقلال vs استقلال خوزستان AND شمس vs مس). */
+const CITY_TOKENS = new Set();
+for (const w of CITY_WORDS) for (const t of String(w).split(' ')) CITY_TOKENS.add(t);
+function coreKey(s) {
+  return normExact(s).split(' ').filter(t => t && !CITY_TOKENS.has(t)).sort().join('|');
+}
 function resolveClubId(name, clubs) {
   const n = normExact(name);
   let hit = clubs.find(c => normExact(c.fa_name) === n);
   if (hit) return hit.id;
-  const stripped = s => {
-    let t = normExact(s);
-    for (const w of CITY_WORDS) t = t.split(w).join(' ');
-    return t.replace(/\s+/g, ' ').trim();
-  };
-  const sn = stripped(name);
-  const cands = clubs.filter(c => {
-    const cs = stripped(c.fa_name);
-    return cs && sn && (cs === sn || cs.includes(sn) || sn.includes(cs));
-  });
+  const key = coreKey(name);
+  if (!key) return null;
+  const cands = clubs.filter(c => coreKey(c.fa_name) === key);
   if (cands.length === 1) return cands[0].id;
   return null;
 }
