@@ -360,7 +360,7 @@ function initDraft(existing) {
   (existing || []).forEach(s => { bySlot[s.slot] = s; });
   slots.forEach(s => {
     const ex = bySlot[s.slot];
-    if (ex) s.player = state.players.find(p => p.id === ex.player_id) || null;
+    if (ex) s.player = state.players.find(p => Number(p.id) === Number(ex.player_id)) || null;
   });
   if (existing?.length === 15) {
     const cap = existing.find(s => s.is_captain);
@@ -536,7 +536,6 @@ async function saveSquad() {
   const d = state.draft;
   if (d.slots.some(s => !s.player)) return toast('۱۵ بازیکن لازم است', 'err');
   const slots = d.slots.map(s => ({ player_id: s.player.id, slot: s.slot, is_captain: s.is_captain, is_vice: s.is_vice }));
-  const starting = slots.filter(s => s.slot <= 11).map(s => s.player ? state.players.find(p => p.id === s.player_id).pos : null);
   try {
     const r = await api('/squad', { method: 'POST', body: JSON.stringify({ slots }) });
     const t = r.transfers || {};

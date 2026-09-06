@@ -244,7 +244,7 @@ router.get('/leaderboard', async (req, res) => {
 
 // Fixtures + my gw history
 async function fixturesHandler(req, res) {
-  const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
+  const gwId = Number(req.params.gw) || (await currentGw())?.id || (await nextGw())?.id || 1;
   const { rows } = await query(`
     SELECT f.*, c1.fa_name AS home, c1.en_name AS home_en, c2.fa_name AS away, c2.en_name AS away_en
     FROM fixtures f JOIN clubs c1 ON c1.id=f.home_club JOIN clubs c2 ON c2.id=f.away_club
@@ -255,7 +255,7 @@ router.get('/fixtures', fixturesHandler);
 router.get('/fixtures/:gw', fixturesHandler);
 
 async function myPointsHandler(req, res) {
-  const gwId = Number(req.params.gw) || (await currentGw())?.id || 1;
+  const gwId = Number(req.params.gw) || (await currentGw())?.id || (await nextGw())?.id || 1;
   const detail = await computeEntryGw(req.entry.id, gwId);
   const { rows } = await query(`
     SELECT s.slot, s.player_id, p.fa_name, p.pos, c.fa_name AS club,

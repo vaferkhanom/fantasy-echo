@@ -41,8 +41,8 @@ async function refreshGwFlags() {
       GROUP BY g.id ORDER BY MIN(f.kickoff) LIMIT 1
     ) UPDATE gameweeks SET is_next=true WHERE id IN (SELECT id FROM nxt)
   `);
-  // If nothing is current/next (e.g. between seasons), fallback: first unfished gw
-  const { rows } = await query(`SELECT count(*)::int AS n FROM gameweeks WHERE is_current OR is_next`);
+  // If nothing is current (e.g. between seasons), fallback: first unfinished gw
+  const { rows } = await query(`SELECT count(*)::int AS n FROM gameweeks WHERE is_current`);
   if (rows[0].n === 0) {
     await query(`
       WITH nxt AS (
